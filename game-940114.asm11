@@ -1,0 +1,1559 @@
+*************************************************************************
+*									*
+*	G A M E								*
+*									*
+*************************************************************************
+*	TAI power on reset version.					*
+*************************************************************************
+*=======================================================================*
+*	Memory allocation.						*
+*=======================================================================*
+zpage	equ	$0000		Zero page definition.
+mcureg	equ	$f000		Top of internal register.
+mcuram	equ	$f100		Top of internal RAM.
+mcuinit	equ	$ff		Value of INIT register.
+stack1	equ	$f5ff		Primary stack area (512 bytes).
+stack2	equ	$f57f		2nd Stack area (1024 bytes).
+start	equ	$f800		Top of interpreter.
+prgbeg	equ	$1000		Top of user program area.
+prgend	equ	$dfff		Bottom of user program area.
+buflen	equ	72		Line buffer length.
+
+*=======================================================================*
+*	Character codes.						*
+*=======================================================================*
+crcode	equ	$0d		CR
+lfcode	equ	$0a		LF
+spcode	equ	$20		SPACE
+rubcode	equ	$08		BS
+delcode	equ	$7f		DEL
+
+*=======================================================================*
+*	MCU internal registers.						*
+*=======================================================================*
+init	equ	$3d
+config	equ	$3f
+scbd	equ	$70
+sccr2	equ	$73
+scsr1	equ	$74
+scdr	equ	$77
+creg	equ	$c0
+aluc	equ	$c4
+areg	equ	$c5
+breg	equ	$c7
+aluf	equ	$c9
+
+*=======================================================================*
+*	Baud rate options.						*
+*=======================================================================*
+*bddiv	equ	26		9600baud at 2MHz
+*bddiv	equ	52		9600baud at 4MHz
+*bddiv	equ	78		9600baud at 6MHz
+bddiv	equ	39		19200baud at 6MHz
+*bddiv	equ	78		9600baud at 6MHz
+*bddiv	equ	156		4800baud at 6MHz
+*bddiv	equ	312		2400baud at 6MHz
+*bddiv	equ	625		1200baud at 6MHz
+
+*=======================================================================*
+*	System variables.						*
+*=======================================================================*
+*---------------------------------------------------------------*
+*	Zero page area definition.				*
+*		GAME uses first half zero page area.		*
+*		The second half is for user.			*
+*---------------------------------------------------------------*
+	org	zpage
+varbase	equ	*
+	rmb	32*2		@`A-Z[{\\|]}^~_	Norminal variable area.
+mem44	rmb	2		sp	Stack pointer save area.
+mem46	rmb	2		!	Current Column Index.
+mem48	rmb	2		"	Arithmetic right hand side.
+mem4a	rmb	2		#	Next Program Counter.
+mem4c	rmb	2		$	General purpose memory.
+mem4e	rmb	2		%	Remainder register.
+prgbot	rmb	2		&	Bottom of current program.
+mem52	rmb	2		'	Random number seed.
+mem54	rmb	2		(	End of TERM pointer.
+mem56	rmb	2		)	Current line pointer.
+prglas	rmb	2		*	Bottom of user program area.
+mem5a	rmb	2		+	Editor work pointer.
+mem5c	rmb	2		,	Number of columns to output.
+mem5e	rmb	2		-	Column index pointer.
+mem60	rmb	2		.	Top of column pointer.
+mem62	rmb	2		/	Top of command line.
+_rxgetp	rmb	2		0	Get pointer for RX ring.
+_rxputp	rmb	2		1	Put pointer for RX ring.
+_txgetp	rmb	2		2	Get pointer for TX ring.
+_txputp	rmb	2		3	Put pointer for TX ring.
+_scicnt	rmb	2		4	Two 8-bits counters.
+	rmb	2		5
+	rmb	2		6
+	rmb	2		7
+	rmb	2		8
+	rmb	2		9
+	rmb	2		:
+	rmb	2		;
+mem7c	rmb	2		<	Variable base address.
+prgtop	rmb	2		=	Top of Current program.
+_ret	rmb	2		>	Return value of CALL.
+sp2	rmb	2		?	2nd stack pointer.
+
+*---------------------------------------------------------------*
+*	Work area definition.					*
+*---------------------------------------------------------------*
+	org	mcuram
+rxring	rmb	128		Ring buffer for RX.
+txring	rmb	128		Ring buffer for TX.
+rxgetp	rmb	2
+rxputp	rmb	2
+txgetp	rmb	2
+txputp	rmb	2
+scicnt	rmb	2
+rxcnt	equ	scicnt		Use MSB
+txcnt	equ	scicnt+1	Use LSB
+numbuf	rmb	6		Number buffer.
+numbufe	rmb	1		Tail of number buffer. (end of string)
+linbuf	rmb	buflen		Line buffer
+
+*=======================================================================*
+*	Main routine.							*
+*=======================================================================*
+	org	start
+coldst	equ	*
+	jmp	cstrt
+hotst	equ	*
+	bsr	hstrt
+*---------------------------------------------------------------*
+*	Cold start.						*
+*---------------------------------------------------------------*
+cstrt	equ	*
+	sei	------------------------No INT in this area.-----
+	ldaa	#mcuinit	Map REG and RAM.
+	staa	init
+	ldx	#mcureg		Initialize internal registers.
+	ldaa	#$04		NOCOP & !ROMON.
+	staa	config,x
+	jsr	initbbb		Initialize I/O system.
+	ldx	#prgbeg		Set Currnet program pointer.
+	stx	prgtop
+	stx	prgbot
+	ldaa	#$ff		End of Program.
+	staa	0,x
+*---------------------------------------------------------------*
+*	Hot start.						*
+*---------------------------------------------------------------*
+hstrt	equ	*
+	sei	------------------------No INT in this area.-----
+	ldx	#prgend
+	stx	prglas
+*---------------------------------------------------------------*
+*	Main loop.						*
+*---------------------------------------------------------------*
+main	equ	*
+	sei	------------------------No INT in this area.-----
+	lds	#stack1
+	cli	-------------------------------------------------
+	ldx	#stack2
+	stx	sp2
+	ldx	#ready
+	jsr	outstr
+pmode	equ	*
+	jsr	inpcom
+	bcs	tstlst		Editor command.
+	stx	mem56		Current line pointer.
+	jsr	excstd
+	beq	main
+newl	equ	*		Line number changed.
+	bsr	srclin
+excl	equ	*
+	bmi	main
+	stx	mem56
+this	equ	*
+	inx
+	inx
+	ldaa	0,x
+	cmpa	#spcode
+	bne	nxtl
+	jsr	excstp
+	bne	jump
+	inx
+	tst	0,x
+	bra	excl
+nxtl	equ	*
+	bsr	nxtlin
+	bra	excl
+jump	equ	*
+	ldx	mem56		Current line pointer.
+	stx	mem60		Save current line pointer.
+	bsr	srch		Search next line.
+	bmi	main
+	cpx	mem60		Same line ?
+	beq	newl
+	bra	this
+*---------------------------------------------------------------*
+*	List or Edit.						*
+*---------------------------------------------------------------*
+tstlst	equ	*
+	stx	mem62		Top of command line.
+	std	mem4a
+	ldab	0,x
+	cmpb	#'/
+	bne	editer
+*---------------------------------------------------------------*
+*	List Program.						*
+*---------------------------------------------------------------*
+list	equ	*
+	bsr	srclin
+llp	equ	*
+	jsr	crlf
+	tst	0,x
+	bmi	main
+	bsr	outlin
+	bra	llp
+*---------------------------------------------------------------*
+*	List a line.						*
+*---------------------------------------------------------------*
+outlin	equ	*
+	stx	mem56		Current line pointer.
+	ldab	#5
+	stab	mem5c		Number of columns is 5.
+	ldd	0,x
+	jsr	prght2
+	ldx	mem56		Current line pointer.
+	inx
+	inx
+	jsr	outstr
+*---------------------------------------------------------------*
+*	Search line end.					*
+*---------------------------------------------------------------*
+srczro	equ	*
+	ldx	mem56		Current line pointer.
+	inx
+sz1	equ	*
+	inx
+	tst	0,x
+	bne	sz1
+	inx
+	rts
+*---------------------------------------------------------------*
+*	Search the line.					*
+*---------------------------------------------------------------*
+srclin	equ	*
+	ldx	prgtop
+srclin1	equ	*
+	stx	mem56		Current line pointer.
+srch	equ	*
+	ldd	0,x
+	bmi	sle		Reach at end of program.
+	subd	mem4a
+	bcc	found
+nxtlin	equ	*
+	bsr	srczro
+	bra	srclin1
+found	equ	*
+	clra
+sle	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Editer.							*
+*---------------------------------------------------------------*
+editer	equ	*
+	ldx	mem4a		Next program counter.
+	beq	list		0 was entered.
+	bmi	erend		Line number to large.
+	ldx	prgbot
+	ldaa	0,x
+	inca
+	bne	erend		Program protected.
+	bsr	srclin
+	bmi	length		At end of program.
+	ldx	0,x
+	cpx	mem4a		Entered line number.
+	bne	length		Insert the line.
+delete	equ	*		Delete before Insert.
+	bsr	srczro		Search the end of line.
+*+++++ Move [X,prgbot] => [mem56,????] +++++*
+	ldy	mem56
+	bra	delete2
+delete1	equ	*
+	inx
+	iny
+delete2	equ	*
+	ldaa	0,x
+	staa	0,y
+	cpx	prgbot		End of transport ?
+	bne	delete1
+	sty	prgbot
+*+++++ Count line length +++++*
+length	equ	*
+	ldx	mem62		Top of command line.
+	ldab	#3		Bytes of a null line.
+	tst	0,x
+	beq	edend		Delete only.
+length1	equ	*
+	incb
+	inx
+	tst	0,x
+	bne	length1
+	clra
+	addd	prgbot		Calculate new bottom of program.
+	std	mem5a		New bottom of program.
+	cpd	prglas		Reach to memory end ?
+	bcc	erend		Program area overflow.
+*+++++ Move [mem56,prgbot] => [????,mem5a] +++++*
+mspace	equ	*
+	ldx	prgbot
+	std	prgbot		New bottom of program.
+	xgdy
+	bra	mspace2
+mspace1	equ	*
+	dex
+	dey
+mspace2	equ	*
+	ldaa	0,x
+	staa	0,y
+	cpx	mem56		End of transport ?
+	bne	mspace1
+*+++++ Move [mem62,???(0)] => [mem56,????] +++++*
+insert	equ	*
+	ldd	mem4a		Entered line number.
+	std	0,x
+	ldy	mem62		Top of command line.
+	bra	insert2
+insert1	equ	*
+	iny
+	inx
+insert2	equ	*
+	ldaa	0,y		Command line character.
+	staa	2,x		Line number offset.
+	bne	insert1
+*+++++ End of editor +++++*
+edend	equ	*
+	jmp	pmode
+erend	equ	*
+	jmp	main
+*---------------------------------------------------------------*
+*	Binary to Decimal with ZERO blanking.			*
+*---------------------------------------------------------------*
+bindec	equ	*
+	ldy	#numbuf+1	number buffer.
+	ldx	#ctable		10^x table.
+bindec1	equ	*
+	pshx			Save ctable pointer.
+	ldx	0,x		10^x constant.
+	idiv			X = D / X; D = D % X
+	xgdx			Save Remainder into X.
+	addb	#'0		Quotient.
+	stab	0,y		Fill number buffer.
+	iny			Next column.
+	xgdx			Restore Remainder.
+	pulx			Restore ctable pointer.
+	inx
+	inx
+	cpx	#ctabbot	Test LSB for end of table
+	bne	bindec1
+	ldx	#numbuf
+	com	5,x		Mark tail.
+	clr	numbufe-numbuf,x	Mark end of string.
+	ldab	#'0		Find '0 character.
+bindec2	equ	*
+	inx
+	cmpb	0,x		Is erasable ZERO ?
+	beq	bindec2
+	com	numbuf+5	Recover tail.
+bindece	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Output chr String.					*
+*---------------------------------------------------------------*
+outstr	equ	*
+	clra			NUL end of string.
+outstr1	equ	*
+	ldab	0,x
+	inx
+	cba			Check end of string.
+	beq	break
+	jsr	outbbb
+	bra	outstr1
+*---------------------------------------------------------------*
+*	Break.							*
+*---------------------------------------------------------------*
+break	equ	*
+	jsr	tstbrk
+	bcc	bindece
+	bsr	inpbne1		Get a character witoout ECHO.
+	cmpb	#3		ctrl-C
+	beq	erend
+	cmpb	#1		ctrl-A
+	bne	bindece
+inpbne1	equ	*
+	jmp	inpbne
+*---------------------------------------------------------------*
+*	Execute Statements.					*
+*---------------------------------------------------------------*
+stm2	equ	*
+	cmpa	#spcode
+	beq	excstp		delimiter
+	clrb
+	stab	mem4a
+	stab	mem4a+1
+nopstm	equ	*
+	ldab	1,x
+	bitb	#$df		Check SPACE and NUL
+	bne	litstr
+*+++++ RETURN +++++*
+return	equ	*		Check one character command
+	cmpa	#']
+	bne	do
+	jsr	pullpc		RETURN statement
+	bra	stm3
+*+++++ DO +++++*
+do	equ	*
+	cmpa	#'@
+	bne	litstr
+	inx			DO statement
+	stx	mem46
+	clra
+	clrb
+	bsr	pushvp
+	bra	stm3
+*+++++ PUTS +++++*
+litstr	equ	*
+	cmpa	#'"
+	bne	lscrlf
+	inx			PUTS statement
+	bsr	outstr1
+	bra	excstd
+*+++++ CRLF +++++*
+lscrlf	equ	*
+	cmpa	#'/
+	bne	artstm
+	jsr	crlf		CRLF statement
+	bra	excstp
+artstm	equ	*
+	stx	mem60		Save top of column pointer.
+	bsr	srcequ
+	jsr	comand
+	bsr	break
+	ldx	mem4a
+	bne	stm4
+stm3	equ	*
+	ldx	mem46
+	fcb	$21		BRN
+excstp	equ	*
+	inx
+excstd	equ	*
+	ldaa	0,x
+	bne	stm2
+stm4	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Push var & pointers.					*
+*---------------------------------------------------------------*
+pushvp	equ	*
+	sei	------------------------No INT in this area.-----
+	sts	mem44
+	lds	sp2
+	ldx	mem56		Current line pointer.
+	pshx
+	ldx	mem46		Current column index.
+	pshx
+	pshb			End value.
+	psha
+	sts	sp2
+	lds	mem44
+	cli	-------------------------------------------------
+	rts
+*---------------------------------------------------------------*
+*	Second arth-exp. FOR-loop structure.			*
+*---------------------------------------------------------------*
+secae	equ	*
+	pshb
+	inx
+	bsr	artexp
+	bsr	pushvp
+	pulb
+	pula
+	rts
+*---------------------------------------------------------------*
+*	Search '=' mark.					*
+*---------------------------------------------------------------*
+se1	equ	*
+	ldaa	#'=		Search = mark.
+	jmp	error
+srcequ	equ	*
+	ldaa	0,x
+	inx
+	bita	#$df		Check SPACE and NUL
+	beq	se1
+	cmpa	#'=
+	bne	srcequ
+*---------------------------------------------------------------*
+*	Arithmatic expression.					*
+*---------------------------------------------------------------*
+artexp	equ	*
+	bsr	term
+ae1	equ	*
+	psha
+	ldaa	0,x
+	bita	#$df		Check SPACE and NUL
+	beq	ae2
+	cmpa	#')
+	beq	ae3
+	cmpa	#',
+	beq	secae
+	pula
+	bsr	binope
+	ldx	mem54		End of TERM pointer.
+	bra	ae1
+ae2	equ	*
+	stx	mem46
+	fcb	$21		BRN
+ae3	inx
+	pula
+	rts
+*---------------------------------------------------------------*
+*	Term (1).						*
+*---------------------------------------------------------------*
+term	equ	*
+	jmp	term2
+term3	equ	*
+	cmpb	#'?
+	bne	tm1
+	pshx			Save column pointer.
+	jsr	inplin		Get a line.
+	bsr	artexp		Evaluate it.
+	pulx			Restore column pointer.
+	inx
+	rts
+tm1	equ	*
+	cmpb	#'(
+	bne	getvar
+	inx			left parenthesis
+aeb	equ	*
+	bra	artexp
+*---------------------------------------------------------------*
+*	Variable or indirect memory reference.			*
+*---------------------------------------------------------------*
+getvar	equ	*		Norminal variable reference.
+	bsr	vname		Get variable name in B.
+	cmpa	#'(
+	beq	get2b
+	cmpa	#':
+	beq	get1b
+getvvv	equ	*		Variable reference.
+	bsr	adrvar
+get2b2	equ	*
+	ldd	0,x		Get 16-bits value.
+getvar1	equ	*
+	ldx	mem5e		Restore column index. (saved in adrvar)
+	rts
+
+get2b	equ	*		16-bit indirect reference.
+	bsr	adr2b
+	bra	get2b2
+
+get1b	equ	*		8-bit indirect reference.
+	bsr	adr1b
+	clra
+	ldab	0,x		Get 8-bits value.
+	bra	getvar1
+*---------------------------------------------------------------*
+*	Variable address.					*
+*---------------------------------------------------------------*
+*+++++ Get variable name in B +++++*
+vname	equ	*
+	ldab	0,x		First character.
+vname1	equ	*
+	inx			Skip a word.
+	ldaa	0,x
+	cmpa	#'A
+	bpl	vname1		Skip if ($41 <= [X] < $C1)
+	rts
+*+++++ Calculate indirect memory address in 8-bits table. +++++*
+adr1b	equ	*
+	bsr	adrind		Indirect base address.
+	bra	adrxb
+*+++++ Calculate indirect memory address in 16-bits table. +++++*
+adr2b	equ	*
+	bsr	adrind		Indirect base address.
+	asld			16-bits indirect.
+adrxb	equ	*
+	addd	mem7c		Base address. (saved in adrind)
+	xgdx			Move into X register.
+	rts
+*+++++ Calculate indirect base address. +++++*
+adrind	equ	*
+	bsr	adrvar		Get variable address.
+	ldx	0,x		Value of variable.
+	stx	mem7c		Base address result.
+	ldx	mem5e		Restore column index.
+	inx			Skip ':' or '(' character.
+	bsr	aeb		Arithmetic expression.
+	stx	mem5e		Save column index.
+	rts
+*+++++ Calculate variable address from character in B +++++*
+adrvar	equ	*
+	cmpb	#'`
+	bcs	adrvar2
+	subb	#'a-'A		Support lower case characters.
+adrvar2	equ	*
+	andb	#$3f		Mask B7 and B6.
+	aslb
+	clra
+	addd	#varbase	D = varbase + (B & 3f) * 2
+	stx	mem5e		Save column index.
+	xgdx			Move the address into X register.
+	rts
+*---------------------------------------------------------------*
+*	Binary Operation (1).					*
+*---------------------------------------------------------------*
+binope	equ	*
+	psha			Left hand side.
+	pshb
+	ldd	0,x
+	psha
+	pshb
+	subb	#'=
+	beq	tchr		<= >=
+	decb
+	bne	ochr		Other operators.
+tchr	equ	*		<>
+	inx
+ochr	equ	*
+	inx
+	bsr	term
+	std	mem48		Right hand side.
+	stx	mem54		End of TERM pointer.
+	ldx	#mem48		RHS pointer.
+	pulb
+	pula
+*---------------------------------------------------------------*
+*	EQ.							*
+*---------------------------------------------------------------*
+	cmpa	#'=
+	bne	bo1
+eq	equ	*
+	pulb			=
+	pula
+	subd	0,x
+	bne	false
+true	equ	*
+	ldd	#1
+	rts
+*---------------------------------------------------------------*
+*	NE & LT & LE.						*
+*---------------------------------------------------------------*
+bo1	equ	*
+	cmpa	#'<
+	bne	bo2
+	cmpb	#'=
+	bne	bo1a
+le	equ	*		<=
+	pulb
+	pula
+	ble	true
+	bra	false
+bo1a	equ	*
+	cmpb	#'>
+	bne	lt
+ne	equ	*
+	pulb
+	pula			<>
+	subd	0,x
+	bne	true
+	bra	false
+lt	equ	*		<
+	pulb
+	pula
+	subd	0,x
+	blt	true
+false	equ	*
+	clra
+	clrb
+	rts
+*---------------------------------------------------------------*
+*	GT & GE.						*
+*---------------------------------------------------------------*
+bo2	equ	*
+	cmpa	#'>
+	bne	bo3
+	cmpb	#'=
+	bne	gt
+ge	equ	*
+	pulb
+	pula			>=
+	subd	0,x
+	bge	true
+	bra	false
+gt	equ	*
+	pulb
+	pula			>
+	subd	0,x
+	bgt	true
+	bra	false
+bo3	equ	*
+	pulb
+*---------------------------------------------------------------*
+*	Addition.						*
+*---------------------------------------------------------------*
+	cmpa	#'+
+	bne	bo4
+	pula
+add	equ	*
+	addd	0,x
+	rts
+*---------------------------------------------------------------*
+*	Subtraction.						*
+*---------------------------------------------------------------*
+bo4	equ	*
+	cmpa	#'-
+	bne	bo5
+	pula
+sub	equ	*
+	subd	0,x
+	rts
+*---------------------------------------------------------------*
+*	Multiplication.						*
+*	D = D * [X]						*
+*---------------------------------------------------------------*
+bo5	equ	*
+	cmpa	#'*
+	bne	bo6
+	pula
+mltply	equ	*
+	stab	mem4c+1
+	ldab	1,x
+	mul
+	stab	mem4c
+	ldaa	0,x
+	ldab	mem4c+1
+	mul
+	addb	mem4c
+	stab	mem4c
+	ldaa	1,x
+	ldab	mem4c+1
+	mul
+	adda	mem4c
+	rts
+
+*	std	mcureg+areg
+*	ldd	0,x
+*	std	mcureg+breg
+*	ldd	#$0104
+*	staa	mcureg+aluf	Clear flag.
+*	stab	mcureg+aluc	Explicit trigger.
+*mult1	equ	*
+*	bita	mcureg+aluf
+*	beq	mult1
+*	ldd	mcureg+creg+2	Lower(16)
+*	rts
+
+bo6	equ	*
+	jmp	bo8
+*---------------------------------------------------------------*
+*	Constant for 2-10.					*
+*---------------------------------------------------------------*
+ctable	equ	*
+	fdb	10000
+	fdb	1000
+	fdb	100
+	fdb	10
+	fdb	1
+ctabbot	equ	*
+*---------------------------------------------------------------*
+*	Test decimal number.					*
+*---------------------------------------------------------------*
+tstdec	equ	*
+	ldab	0,x
+	cmpb	#'0
+	bcs	td1
+	cmpb	#'9+1
+	rts
+td1	equ	*
+	clc
+	rts
+td2	equ	*
+	sec
+tde	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Input command.						*
+*---------------------------------------------------------------*
+inpcom	equ	*
+	bsr	il1
+*---------------------------------------------------------------*
+*	Decimal to Binary.					*
+*---------------------------------------------------------------*
+deccns	equ	*
+	bsr	tstdec
+	bcc	tde		Not digit.
+decbin	equ	*
+	clra
+	clrb
+db1	equ	*
+	addb	0,x
+	adca	#0
+	subd	#'0
+	std	mem4c
+	inx
+	pshb
+	bsr	tstdec
+	pulb
+	bcc	td2		Not digit.
+	asld
+	asld
+	addd	mem4c
+	asld
+	bra	db1
+*---------------------------------------------------------------*
+*	Input to Line Buffer.					*
+*---------------------------------------------------------------*
+il0	equ	*
+	cmpb	#delcode
+	beq	il1
+	inx
+	cpx	#linbuf+buflen
+	bne	il3
+il1	equ	*
+	bsr	crlf
+inplin	equ	*
+	ldab	#':		Prompt.
+	bsr	outb2
+	ldx	#linbuf+1
+il2	equ	*
+	dex
+	cpx	#linbuf
+	bcs	inplin
+il3	equ	*
+	jsr	inpbbb
+	stab	0,x
+	cmpb	#rubcode
+	beq	il2
+	cmpb	#crcode
+	bcs	il3
+	bne	il0
+	clr	0,x
+il4	equ	*
+	ldx	#linbuf
+	bra	lf
+*---------------------------------------------------------------*
+*	CR/LF.							*
+*---------------------------------------------------------------*
+crlf	equ	*
+	ldab	#crcode
+	bsr	outb2
+lf	equ	*
+	ldab	#lfcode
+outb2	equ	*
+	jmp	outbbb
+*---------------------------------------------------------------*
+*	Commands.						*
+*---------------------------------------------------------------*
+comand	equ	*
+	pshb
+	ldx	mem60		Top of column pointer.
+	ldab	0,x
+*+++++ TAB +++++*
+	cmpb	#'.
+	bne	cm1
+	pulb
+	tba
+tab1	equ	*
+	tsta
+	beq	ife
+	ldab	#spcode
+	bsr	outb2
+	deca
+	bra	tab1
+*+++++ IF +++++*
+cm1	equ	*
+	cmpb	#';
+	bne	cm3
+	pulb
+	std	mem4c		Garbage memory.
+	bne	ife		Continue if not ZERO.
+else	equ	*
+	lds	#stack1
+	jmp	nxtl		Skip to next line.
+ife	equ	*
+	rts
+*+++++ Pull Program Counter +++++*
+pullpc	equ	*
+	sei	------------------------No INT in this area.-----
+	sts	mem44
+	lds	sp2
+	pulx
+	stx	mem46		Current column index.
+	pulx
+	stx	mem56		Current line pointer.
+	sts	sp2
+	lds	mem44
+	cli	-------------------------------------------------
+	rts
+*+++++ NEXT/UNTIL +++++*
+cm3	equ	*
+	cmpb	#'@
+	bne	cm4
+	psha
+	ldab	2,x		Loop variable.
+	jsr	adrvar
+	pula
+	pulb
+	std	0,x		Update the variable.
+	bsr	pullab		End value.
+	subd	0,x		(END)-(VAR)
+	blt	droppc		Quit the loop. (VAR > END)
+huloop	equ	*		Continue loop.
+	bsr	pullpc		Pull Program Counter
+	ldd	sp2		Recover SP2 pointer
+	subd	#6
+	std	sp2
+	rts
+droppc	equ	*		Drop Program Counter
+	ldd	sp2
+	addd	#4
+	std	sp2
+	rts
+pullab	equ	*
+	sei	------------------------No INT in this area.-----
+	sts	mem44
+	lds	sp2
+	pula
+	pulb
+	sts	sp2
+	lds	mem44
+	cli	-------------------------------------------------
+	rts
+*+++++ NEW +++++*
+cm4	equ	*
+	cmpb	#'&
+	bne	cm5
+	ldab	1,x
+	cmpb	#'=
+	bne	cm5
+	pulb
+	std	mem4c		Garbage memory.
+	bne	newe		Skip if not ZERO.
+	ldx	prgtop
+	stx	prgbot
+	deca
+	staa	0,x
+newe	equ	*
+	rts
+*+++++ GOSUB +++++*
+cm5	equ	*
+	cmpb	#'!
+	bne	cm6
+	pulb
+	std	mem4a		Next program counter.
+	beq	gosube		End of program.
+pushpc	equ	*
+	sei	------------------------No INT in this area.-----
+	sts	mem44		Save stack pointer.
+	lds	sp2
+	ldx	mem56		Current line pointer.
+	pshx
+	ldx	mem46		Current column index.
+	pshx
+	sts	sp2
+	lds	mem44		Restore stack pointer.
+	cli	-------------------------------------------------
+gosube	equ	*
+	rts
+*+++++ PRINT ASCII CHR +++++*
+cm6	equ	*
+	cmpb	#'$
+	bne	cm7
+	pulb
+outb1	equ	*
+	jmp	outbbb
+*+++++ PRINT DECIMAL RIGHT +++++*
+cm7	equ	*
+	cmpb	#'?
+	bne	cm8
+	ldab	1,x		Print statement.
+	cmpb	#'(
+	beq	prght
+	jmp	qmark
+prght	equ	*
+	psha			Save A register.
+	inx
+	jsr	term2		Get number of columns.
+	stab	mem5c		Number of column in 8-bits.
+	pula			Restore D register.
+	pulb
+prght2	equ	*
+	bsr	bdsgn		Fill number buffer.
+	stx	mem4c		Pointer to number buffer.
+	ldaa	mem5c		Number of columns.
+	adda	mem4c+1		Top of buffer.
+	suba	#numbufe&255	Tail of buffer. Tab=Num+Top-Tail
+	bmi	prght1		Tab < 0
+	jsr	tab1		Put spaces.
+prght1	equ	*
+	jmp	outstr		Put number string.
+*---------------------------------------------------------------*
+*	Fill number buffer with decimal number with sign.	*
+*---------------------------------------------------------------*
+bdsgn	equ	*
+	tsta
+	bpl	bdpos		Positive number.
+bdneg	equ	*		Negative number.
+*	macro NEGD		D = -D
+	nega
+	negb
+	sbca	#0
+*
+	bsr	bdpos
+	ldab	#'-		Negative number sign.
+	dex
+	stab	0,x
+pre	equ	*
+	rts
+bdpos	equ	*
+	jmp	bindec
+*+++++ PG Address Change +++++*
+cm8	equ	*
+	cmpb	#'=
+	bne	cm9
+	pulb
+	std	prgtop
+	ldx	#$ffff
+	stx	mem4a
+	jsr	srclin
+	stx	prgbot
+	jmp	main
+*+++++ GO USER SUB +++++*
+cm9	cmpb	#'>
+	bne	setvar
+	pulb			Restore B register.
+	std	mem4c		Garbage memory.
+	beq	pre		Skip if ZERO.
+	xgdx
+	jsr	0,x
+	pshb
+*+++++ LET +++++*
+setvar	equ	*
+	psha
+	ldx	mem60		Top of column pointer.
+	jsr	vname
+	cmpa	#'(
+	beq	set2b
+	cmpa	#':
+	beq	set1b
+setvvv	equ	*		Set variable.
+	jsr	adrvar
+set2b2	equ	*
+	pula
+	pulb
+	std	0,x
+	rts
+
+set2b	equ	*		Set 16-bits indirect memory.
+	jsr	adr2b
+	bra	set2b2
+set1b	equ	*		Set 8-bits indirect memory.
+	jsr	adr1b
+	pula
+	pulb
+	stab	0,x
+	rts
+*---------------------------------------------------------------*
+*	Binary Operation (2).					*
+*---------------------------------------------------------------*
+
+*+++++ DIVISION +++++*
+bo8	equ	*
+	cmpa	#'/
+	bne	error
+	pshb			Save B
+	clr	mem4c		Clear flag
+	ldd	0,x
+	beq	error		is ZERO
+	bpl	dv3		is POSITIVE
+	inc	mem4c		is NEGATIVE
+*	macro NEGD
+	nega
+	negb
+	sbca	#0
+*
+dv3	equ	*
+	std	0,x
+	pulb			Restore B
+	pula			Restore A
+	tsta
+	bpl	dv4		is POSITIVE
+	dec	mem4c		is NEGATIVE
+*	macro NEGD
+	nega
+	negb
+	sbca	#0
+*
+dv4	equ	*
+	pshx			Save X.
+	ldx	0,x
+	idiv			X = D / X; D = D % X
+	std	mem4e		Remainder.
+	xgdx			Quotient to D.
+	pulx			Restore X.
+	brclr	mem4c $01 dv5
+*	macro NEGD
+	nega
+	negb
+	sbca	#0
+*
+dv5	equ	*
+	rts
+*---------------------------------------------------------------*
+*	ERROR.							*
+*---------------------------------------------------------------*
+error	equ	*
+	jsr	crlf
+	ldab	#'?		Error mesage.
+	bsr	outb3
+	tab
+	bsr	outb3
+	ldab	#spcode
+	bsr	outb3
+	ldx	mem56		Current line pointer.
+	cpx	#linbuf		Direct command ?
+	bne	er1
+	jsr	outstr
+	bra	ere
+er1	equ	*
+	jsr	outlin
+ere	equ	*
+	jmp	main
+*---------------------------------------------------------------*
+*	Term (2).						*
+*---------------------------------------------------------------*
+term2	equ	*
+	jsr	deccns
+	bcs	abs1
+*+++++ Negative +++++*
+	cmpb	#'-
+	bne	tm3
+	inx
+	bsr	term2
+neg1	equ	*
+*	macro NEGD
+	nega
+	negb
+	sbca	#0
+*
+	rts
+*+++++ Absolute value +++++*
+tm3	equ	*
+	cmpb	#'+
+	bne	tm4
+	inx
+	bsr	term2
+	tsta
+	bmi	neg1
+abs1	equ	*
+	rts
+*+++++ NOT +++++*
+tm4	equ	*
+	cmpb	#'#
+	bne	tm5
+	inx
+	bsr	term2
+	aba
+	bne	not1		False if not ZERO.
+	ldab	#1
+	fcb	$21		BRN instruction.
+not1	equ	*
+	clrb
+	clra
+	rts
+*+++++ Modulo +++++*
+tm5	equ	*
+	cmpb	#'%
+	bne	tm6
+	inx
+	bsr	term2
+	ldd	mem4e
+	rts
+*+++++ Random number +++++*
+tm6	equ	*
+	cmpb	#''
+	bne	tm7
+	inx
+	bsr	term2
+	pshx			Save X register.
+	std	mem48		RHS
+*				mem52 = [mem52] * $3d09 + 1
+	ldx	#mem52
+	ldd	#$3d09
+	jsr	mltply
+
+*	ldaa	mem52
+*	ldab	#$09
+*	mul
+*	stab	mem52
+*	ldaa	mem52+1
+*	ldab	#$3d
+*	mul
+*	addb	mem52
+*	stab	mem52
+*	ldaa	mem52+1
+*	ldab	#$09
+*	mul
+*	adda	mem52
+
+	addd	#1
+	std	mem52		Random number seed.
+*
+	ldaa	mem52		Seed.
+	ldab	mem48+1		Low(RHS).
+	mul
+	tab
+	clra
+	addd	#1		From 1 to RHS
+	pulx
+	rts
+outb3	equ	*
+	jmp	outbbb
+*+++++ ASCII constant +++++*
+tm7	equ	*
+	cmpb	#'"
+	bne	tm8
+	clra
+	ldab	1,x
+	inx
+	inx
+	inx
+	rts
+*+++++ Hexadecimal constant +++++*
+tm8	equ	*
+	cmpb	#'$
+	beq	dollar
+	jmp	term3
+*---------------------------------------------------------------*
+*	PRINT DEC / PRINT HEX.					*
+*---------------------------------------------------------------*
+qmark	equ	*
+	cmpb	#'?
+	beq	prhex
+	cmpb	#'$
+	beq	prhex2
+*+++++ PRINT LEFT +++++*
+printl	equ	*
+	pulb
+	jsr	bdsgn		Fill number buffer.
+	jmp	outstr		Put number string.
+*+++++ PRINT 4 HEX +++++*
+prhex	equ	*
+	tab
+	bsr	pr2hex
+*+++++ PRINT 2 HEX +++++*
+prhex2	equ	*
+	pulb
+	tba
+pr2hex	equ	*
+	bsr	prhexh
+	tab
+	andb	#$0f
+	bra	prhexl
+prhexh	equ	*
+	lsrb
+	lsrb
+	lsrb
+	lsrb
+prhexl	equ	*
+	cmpb	#$0a
+	bmi	ph1
+	addb	#'A-'0-10
+ph1	equ	*
+	addb	#'0
+ob1	equ	*
+	bra	outb3
+*---------------------------------------------------------------*
+*	"$" mark in A.E.					*
+*---------------------------------------------------------------*
+dollar	equ	*
+	clra
+	bsr	tsthex
+	bcs	hexbin
+*+++++ ASCII input +++++*
+ipb	equ	*
+	jmp	inpbbb
+*+++++ HEX constant +++++*
+hexbin	equ	*
+	pshb
+	bsr	tsthex
+	stab	mem4c+1
+	pulb
+	bcc	yeshex
+	asld
+	asld
+	asld
+	asld
+	addb	mem4c+1
+	bra	hexbin
+
+tsthex	equ	*
+	inx
+	ldab	0,x
+	cmpb	#'A
+	bcc	tsthex1
+	subb	#'0
+	bcs	nothex		x < '0
+	cmpb	#10
+yeshex	equ	*
+	rts
+
+tsthex1	equ	*
+	cmpb	#'a
+	bcs	tsthex2
+	subb	#'a-'A
+tsthex2	equ	*
+	subb	#'A-10
+	cmpb	#10
+	bcs	nothex
+	cmpb	#$10
+	rts
+
+nothex	equ	*
+	clc
+	rts
+
+*---------------------------------------------------------------*
+*	"*READY" data.						*
+*---------------------------------------------------------------*
+ready	equ	*
+	fcb	crcode,lfcode
+	fcc	'*READY'
+	fcb	0
+
+*=======================================================================*
+*	Terminal I/O routines.						*
+*=======================================================================*
+initbbb	equ	*
+	bsr	rtxinq
+	rts
+inpbne	equ	*
+	bsr	rxgetq
+	rts
+
+inpbbb	equ	*
+	bsr	rxgetq
+outbbb	equ	*
+	bsr	txputq
+	rts
+
+tstbrk	equ	*
+	bsr	rxtstq
+	rts
+
+**=======================================================================*
+**	No queued RX/TX routines.					*
+**=======================================================================*
+*rtxina	equ	*
+*	ldd	#bddiv
+*	std	mcureg+scbd
+*	ldab	#$0c	Enable SCI.
+*	stab	mcureg+sccr2
+*	rts
+*
+*rxgeta	equ	*
+*	pshx
+*	ldx	#mcureg
+*	brclr	scsr1,x $20 *
+*	ldab	scdr,x
+*	pulx
+*	rts
+*
+*txputa	equ	*
+*	pshx
+*	ldx	#mcureg
+*	brclr	scsr1,x $80 *
+*	stab	scdr,x
+*	pulx
+*	rts
+*
+*rxtsta	equ	*
+*	pshx
+*	ldx	#mcureg
+*	clc
+*	brclr	scsr1,x $20 rxtsta1
+*	sec				Arrived.
+*rxtsta1	equ	*
+*	pulx
+*	rts
+
+*=======================================================================*
+*	TX/RX queue buffer support program.				*
+*=======================================================================*
+*---------------------------------------------------------------*
+*	Initialize queue buffer.				*
+*---------------------------------------------------------------*
+rtxinq	equ	*
+	ldx	#rxring			Initialize queue pointer.
+	stx	rxputp
+	stx	rxgetp
+	ldx	#txring
+	stx	txputp
+	stx	txgetp
+	clra
+	clrb
+	std	scicnt			Clear byte counter.
+	ldd	#bddiv
+	std	mcureg+scbd
+	ldab	#$2c			Enable SCI with RIE.
+	stab	mcureg+sccr2
+	rts
+
+*---------------------------------------------------------------*
+*	Get a character through queue buffer.			*
+*---------------------------------------------------------------*
+rxgetq	equ	*
+	pshx
+	psha
+rxget1	equ	*
+	ldaa	rxcnt
+	beq	rxget1			Wait for data.
+	sei	------------------------No INT in this area.-----
+	dec	rxcnt			Update counter.
+	ldd	rxgetp			Update get pointer.
+	incb
+	andb	#$7f			Clear Bit-7.
+	stab	rxgetp+1		Update LSB only.
+	xgdx				Move D to X.
+	ldab	0,x			Get a character from queue.
+	cli	-------------------------------------------------
+	pula
+	pulx
+	rts
+
+*---------------------------------------------------------------*
+*	Put a character through queue buffer.			*
+*---------------------------------------------------------------*
+txputq	equ	*
+	pshx
+	psha
+txputq1	equ	*
+	ldaa	txcnt			Don't use this value for update.
+	bmi	txputq1			Ring buffer full.
+	sei	------------------------No INT in this area.-----
+	inc	txcnt			Update counter.
+	xgdx				Save B register.
+	ldd	txputp			Update put pointer.
+	incb
+	orb	#$80			Set Bit-7.
+	stab	txputp+1		Update LSB only.
+	xgdx				Move D to X, Restore B.
+	stab	0,x
+	ldx	#mcureg
+	bset	sccr2,x $80		Enable TX interrupt
+	cli	-------------------------------------------------
+	pula
+	pulx
+	rts
+
+*---------------------------------------------------------------*
+*	Test RX queue buffer.					*
+*---------------------------------------------------------------*
+rxtstq	equ	*
+	tst	rxcnt		CCRC=0
+	beq	rxtstq1
+	sec			CCRC=1
+rxtstq1	equ	*
+	rts
+
+*---------------------------------------------------------------*
+*	Interrupt routine for SCI.				*
+*---------------------------------------------------------------*
+sciproc	equ	*
+	ldx	#mcureg
+*+++++ Check TDRE flag for TX +++++*
+	brclr	scsr1,x $80 scipro2	Check TDRE.
+	ldaa	txcnt			Update counter.
+	beq	scipro2			No data in buffer.
+	deca
+	staa	txcnt			Update counter.
+	bne	scipro1			Another data in buffer ?
+	bclr	sccr2,x $80		Disable TX interrupt.
+scipro1	equ	*
+	ldd	txgetp			Update GET pointer.
+	incb
+	orb	#$80			Set Bit-7.
+	stab	txgetp+1		Update only LSB.
+	xgdy				Move D to Y.
+	ldab	0,y			Get a character.
+	stab	scdr,x			Transmit a character.
+*+++++ Check RDRF flag for RX +++++*
+scipro2	equ	*
+	brclr	scsr1,x $20 scipro3	Check RDRF.
+	ldab	scdr,x			Receive a character.
+	ldaa	rxcnt			Update counter.
+	bmi	scipro3			Ring buffer full.
+	inca
+	staa	rxcnt
+	xgdy				Save B register.
+	ldd	rxputp
+	incb
+	andb	#$7f			Clear Bit-7.
+	stab	rxputp+1		Update only LSB.
+	xgdy
+	stab	0,y			Put a character.
+*+++++ Check OverRun flag for RX +++++*
+scipro3	equ	*
+	brclr	scsr1,x $08 scipro4	Check OR.
+	ldab	scdr,x			Dummy read.
+scipro4	equ	*
+	rti
+
+*=======================================================================*
+*	Dummy interrupt Procedure.					*
+*=======================================================================*
+dmproc	equ	*
+	ldaa	#$50		Clear S-bit on CCR.
+	tap
+	stop
+	rti
+
+*=======================================================================*
+*	Interrupt Vector Table.						*
+*=======================================================================*
+	org	$ffc0
+vectab	equ	*
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		Reserved
+	fdb	dmproc		DMA
+	fdb	dmproc		ALU
+	fdb	dmproc		KWI
+	fdb	sciproc		SCI
+	fdb	dmproc		SPI
+	fdb	dmproc		PAC_EDGE
+	fdb	dmproc		PAC_OV
+	fdb	dmproc		TIMER OV
+	fdb	dmproc		TIMER I4O5
+	fdb	dmproc		TIMER OC4
+	fdb	dmproc		TIMER OC3
+	fdb	dmproc		TIMER OC2
+	fdb	dmproc		TIMER OC1
+	fdb	dmproc		TIMER IC3
+	fdb	dmproc		TIMER IC2
+	fdb	dmproc		TIMER IC1
+	fdb	dmproc		RTI
+	fdb	dmproc		IRQ
+	fdb	dmproc		XIRQ
+	fdb	dmproc		SWI
+	fdb	dmproc		ILLOP
+	fdb	dmproc		COP
+	fdb	dmproc		CLKMON
+	fdb	coldst		RESET
+
+	end
+*=======================================================================*
+*	End of program.							*
+*=======================================================================*

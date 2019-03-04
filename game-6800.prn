@@ -1,0 +1,1241 @@
+                        *
+                        *	G A M E
+                        *
+                        
+                        *=======================================================================*
+                        *	Memory allocation.						*
+                        *=======================================================================*
+00ff                    stack1	equ	$00ff
+00d3                    stack2	equ	$00d3
+0089                    sp2	equ	$0089
+0100                    start	equ	$0100
+0800                    prgbeg	equ	$0800
+5fff                    ramend	equ	$5fff
+                        
+                        *=======================================================================*
+                        *	Terminal I/O routines.						*
+                        *=======================================================================*
+8000                    outbbb	equ	$8000
+8003                    inpbbb	equ	$8003
+8006                    tstbrk	equ	$8006
+                        
+                        *=======================================================================*
+                        *	Character codes.						*
+                        *=======================================================================*
+000d                    crcode	equ	$0d
+000a                    lfcode	equ	$0a
+0020                    spcode	equ	$20
+005e                    rubcode	equ	$5e
+005c                    delcode	equ	$5c
+                        
+                        *=======================================================================*
+                        *	System variables.						*
+                        *=======================================================================*
+0000                    wbase	equ	$0000
+0002                    varbase	equ	wbase+$02		@
+003c                    mem3c	equ	wbase+$3c		[
+0042                    mem42	equ	wbase+$42		_
+0046                    mem46	equ	wbase+$46		!
+004a                    mem4a	equ	wbase+$4a		#
+004e                    mem4e	equ	wbase+$4e		%
+0050                    pge	equ	wbase+$50		&
+0052                    mem52	equ	wbase+$52		'
+0058                    pgl	equ	wbase+$58		*
+005a                    mem5a	equ	wbase+$5a		+
+0064                    mem64	equ	wbase+$64		0
+0066                    mem66	equ	wbase+$66		1
+0068                    mem68	equ	wbase+$68		2
+006a                    mem6a	equ	wbase+$6a		3
+006c                    mem6c	equ	wbase+$6c		4
+006e                    mem6e	equ	wbase+$6e		5
+0070                    mem70	equ	wbase+$70		6
+0072                    mem72	equ	wbase+$72		7
+0074                    mem74	equ	wbase+$74		8
+0076                    mem76	equ	wbase+$76		9
+007e                    pgb	equ	wbase+$7e		=
+0082                    mem82	equ	wbase+$82		?
+0087                    mem87	equ	wbase+$87
+0088                    mem88	equ	wbase+$88
+008b                    mem8b	equ	wbase+$8b		line buffer to +$e3
+                        
+                        *=======================================================================*
+                        *	Main routine.							*
+                        *=======================================================================*
+0100                    	org	start
+0100                    coldst	equ	*
+0100 7e 01 05           	jmp	cstrt
+0103                    hotst	equ	*
+0103 8d 0b              	bsr	hstrt
+                        *---------------------------------------------------------------*
+                        *	Cold start.						*
+                        *---------------------------------------------------------------*
+0105                    cstrt	equ	*
+0105 ce 08 00           	ldx	#prgbeg
+0108 df 7e              	stx	pgb
+010a df 50              	stx	pge
+010c 86 ff              	ldaa	#$ff
+010e a7 00              	staa	0,x
+                        *---------------------------------------------------------------*
+                        *	Hot start.						*
+                        *---------------------------------------------------------------*
+0110                    hstrt	equ	*
+0110 ce 5f ff           	ldx	#ramend
+0113 df 58              	stx	pgl
+                        *---------------------------------------------------------------*
+                        *	Main loop.						*
+                        *---------------------------------------------------------------*
+0115                    main	equ	*
+0115 8e 00 ff           	lds	#stack1
+0118 ce 00 d3           	ldx	#stack2
+011b df 89              	stx	sp2
+011d ce 06 f5           	ldx	#ready
+0120 bd 02 46           	jsr	outstr
+0123                    pmode	equ	*
+0123 bd 04 43           	jsr	inpcom
+0126 25 31              	bcs	tstlst
+0128 df 42              	stx	mem42
+012a bd 02 af           	jsr	excstd
+012d 27 e6              	beq	main
+012f                    newl	equ	*
+012f 8d 5b              	bsr	srclin
+0131                    excl	equ	*
+0131 2b e2              	bmi	main
+0133 df 42              	stx	mem42
+0135                    this	equ	*
+0135 08                 	inx
+0136 08                 	inx
+0137 a6 00              	ldaa	0,x
+0139 81 20              	cmpa	#spcode
+013b 26 0a              	bne	nxtl
+013d bd 02 ae           	jsr	excstp
+0140 26 09              	bne	jump
+0142 08                 	inx
+0143 6d 00              	tst	0,x
+0145 20 ea              	bra	excl
+0147                    nxtl	equ	*
+0147 8d 53              	bsr	nxtlin
+0149 20 e6              	bra	excl
+014b                    jump	equ	*
+014b de 42              	ldx	mem42
+014d df 72              	stx	mem72
+014f 8d 3f              	bsr	srch
+0151 2b c2              	bmi	main
+0153 9c 72              	cpx	mem72
+0155 27 d8              	beq	newl
+0157 20 dc              	bra	this
+                        *---------------------------------------------------------------*
+                        *	List or Edit.						*
+                        *---------------------------------------------------------------*
+0159                    tstlst	equ	*
+0159 df 74              	stx	mem74
+015b 97 4a              	staa	mem4a
+015d d7 4b              	stab	mem4a+1
+015f e6 00              	ldab	0,x
+0161 c1 2f              	cmpb	#'/
+0163 26 3d              	bne	editer
+                        *---------------------------------------------------------------*
+                        *	List Program.						*
+                        *---------------------------------------------------------------*
+0165                    list	equ	*
+0165 8d 25              	bsr	srclin
+0167                    llp	equ	*
+0167 bd 04 96           	jsr	crlf
+016a 6d 00              	tst	0,x
+016c 2b a7              	bmi	main
+016e 8d 02              	bsr	outlin
+0170 20 f5              	bra	llp
+                        *---------------------------------------------------------------*
+                        *	List a line.						*
+                        *---------------------------------------------------------------*
+0172                    outlin	equ	*
+0172 df 42              	stx	mem42
+0174 a6 00              	ldaa	0,x
+0176 e6 01              	ldab	1,x
+0178 bd 05 86           	jsr	outnum
+017b de 42              	ldx	mem42
+017d 08                 	inx
+017e 08                 	inx
+017f bd 02 46           	jsr	outstr
+                        *---------------------------------------------------------------*
+                        *	Search line end.					*
+                        *---------------------------------------------------------------*
+0182                    srczro	equ	*
+0182 de 42              	ldx	mem42
+0184 08                 	inx
+0185                    sz1	equ	*
+0185 08                 	inx
+0186 6d 00              	tst	0,x
+0188 26 fb              	bne	sz1
+018a 08                 	inx
+018b 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Search the line.					*
+                        *---------------------------------------------------------------*
+018c                    srclin	equ	*
+018c de 7e              	ldx	pgb
+018e                    sl	equ	*
+018e df 42              	stx	mem42
+0190                    srch	equ	*
+0190 a6 01              	ldaa	1,x
+0192 90 4b              	suba	mem4a+1
+0194 a6 00              	ldaa	0,x
+0196 2b 09              	bmi	sle
+0198 92 4a              	sbca	mem4a
+019a 24 04              	bcc	found
+019c                    nxtlin	equ	*
+019c 8d e4              	bsr	srczro
+019e 20 ee              	bra	sl
+01a0                    found	equ	*
+01a0 4f                 	clra
+01a1                    sle	equ	*
+01a1 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Editer.							*
+                        *---------------------------------------------------------------*
+01a2                    editer	equ	*
+01a2 de 4a              	ldx	mem4a
+01a4 27 bf              	beq	list
+01a6 2b 62              	bmi	erend
+01a8 de 50              	ldx	pge
+01aa a6 00              	ldaa	0,x
+01ac 4c                 	inca
+01ad 26 5b              	bne	erend
+01af 8d db              	bsr	srclin
+01b1 2b 18              	bmi	length
+01b3 ee 00              	ldx	0,x
+01b5 9c 4a              	cpx	mem4a
+01b7 26 12              	bne	length
+01b9                    delete	equ	*
+01b9 8d c7              	bsr	srczro
+01bb 9e 42              	lds	mem42
+01bd                    d0	equ	*
+01bd a6 00              	ldaa	0,x
+01bf 36                 	psha
+01c0 31                 	ins
+01c1 9c 50              	cpx	pge
+01c3 27 04              	beq	d1
+01c5 08                 	inx
+01c6 31                 	ins
+01c7 20 f4              	bra	d0
+01c9                    d1	equ	*
+01c9 9f 50              	sts	pge
+01cb                    length	equ	*
+01cb de 74              	ldx	mem74
+01cd c6 03              	ldab	#3
+01cf 6d 00              	tst	0,x
+01d1 27 31              	beq	edend
+01d3                    l1	equ	*
+01d3 5c                 	incb
+01d4 08                 	inx
+01d5 6d 00              	tst	0,x
+01d7 26 fa              	bne	l1
+01d9 4f                 	clra
+01da db 51              	addb	pge+1
+01dc 99 50              	adca	pge
+01de 97 3c              	staa	mem3c
+01e0 d7 3d              	stab	mem3c+1
+01e2 d0 59              	subb	pgl+1
+01e4 90 58              	suba	pgl
+01e6 24 22              	bcc	erend
+01e8                    mspace	equ	*
+01e8 de 50              	ldx	pge
+01ea 9e 3c              	lds	mem3c
+01ec 9f 50              	sts	pge
+01ee 08                 	inx
+01ef                    ms1	equ	*
+01ef 09                 	dex
+01f0 e6 00              	ldab	0,x
+01f2 37                 	pshb
+01f3 9c 42              	cpx	mem42
+01f5 26 f8              	bne	ms1
+01f7                    insert	equ	*
+01f7 9e 4a              	lds	mem4a
+01f9 af 00              	sts	0,x
+01fb 9e 74              	lds	mem74
+01fd 34                 	des
+01fe                    is1	equ	*
+01fe 08                 	inx
+01ff 33                 	pulb
+0200 e7 01              	stab	1,x
+0202 26 fa              	bne	is1
+0204                    edend	equ	*
+0204 be 01 16           	lds	main+1		#stack1
+0207 7e 01 23           	jmp	pmode
+020a                    erend	equ	*
+020a 7e 01 15           	jmp	main
+                        *---------------------------------------------------------------*
+                        *	Bynary to Decimal.					*
+                        *---------------------------------------------------------------*
+020d                    byndec	equ	*
+020d ce 00 83           	ldx	#mem82+1
+0210 df 6c              	stx	mem6c
+0212 ce 03 fc           	ldx	#ctable
+0215                    bdl	equ	*
+0215 df 6e              	stx	mem6e
+0217 ee 00              	ldx	0,x
+0219 df 70              	stx	mem70
+021b ce 00 70           	ldx	#mem70
+021e bd 04 06           	jsr	divpos		([68] = D / [x]), (D %= [x])
+0221 36                 	psha
+0222 de 6c              	ldx	mem6c
+0224 96 69              	ldaa	mem68+1	
+0226 8b 30              	adda	#'0
+0228 a7 00              	staa	0,x
+022a 08                 	inx
+022b df 6c              	stx	mem6c
+022d de 6e              	ldx	mem6e
+022f 32                 	pula	
+0230 08                 	inx
+0231 08                 	inx
+0232 6d 01              	tst	1,x
+0234 26 df              	bne	bdl
+0236 ce 00 82           	ldx	#mem82
+                        *---------------------------------------------------------------*
+                        *	Zero blanking.						*
+                        *---------------------------------------------------------------*
+0239                    zroblk	equ	*
+0239 63 05              	com	5,x
+023b                    zb1	equ	*
+023b 08                 	inx
+023c e6 00              	ldab	0,x
+023e c1 30              	cmpb	#'0
+0240 27 f9              	beq	zb1
+0242 73 00 87           	com	mem82+5
+0245                    zb2	equ	*
+0245 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Output chr String.					*
+                        *---------------------------------------------------------------*
+0246                    outstr	equ	*
+0246 4f                 	clra
+0247                    ost1	equ	*
+0247 97 88              	staa	mem88
+0249                    o2	equ	*
+0249 e6 00              	ldab	0,x
+024b 08                 	inx
+024c d1 88              	cmpb	mem88
+024e 27 05              	beq	break
+0250 bd 05 4a           	jsr	outb
+0253 20 f4              	bra	o2
+                        *---------------------------------------------------------------*
+                        *	Break.							*
+                        *---------------------------------------------------------------*
+0255                    break	equ	*
+0255 bd 80 06           	jsr	tstbrk
+0258 24 eb              	bcc	zb2
+025a 8d 08              	bsr	inpb
+025c c1 03              	cmpb	#3		ctrl-C
+025e 27 aa              	beq	erend
+0260 c1 01              	cmpb	#1		ctrl-A
+0262 26 e1              	bne	zb2
+0264                    inpb	equ	*
+0264 7e 80 03           	jmp	inpbbb
+                        *---------------------------------------------------------------*
+                        *	Execute Statements.					*
+                        *---------------------------------------------------------------*
+0267                    stm2	equ	*
+0267 81 20              	cmpa	#spcode
+0269 27 43              	beq	excstp		delimiter
+026b 5f                 	clrb
+026c d7 4a              	stab	mem4a
+026e d7 4b              	stab	mem4a+1
+0270                    nopstm	equ	*
+0270 e6 01              	ldab	1,x
+0272 c5 df              	bitb	#$df		Check SPACE and NUL
+0274 26 16              	bne	litstr
+                        *+++++ RETURN +++++*
+0276                    return	equ	*		Check one character command
+0276 81 5d              	cmpa	#']
+0278 26 05              	bne	do
+027a bd 04 c5           	jsr	pulpnt		RETURN statement
+027d 20 2c              	bra	stm3
+                        *+++++ DO +++++*
+027f                    do	equ	*
+027f 81 40              	cmpa	#'@
+0281 26 09              	bne	litstr
+0283 08                 	inx			DO statement
+0284 df 46              	stx	mem46
+0286 4f                 	clra
+0287 5f                 	clrb
+0288 8d 2a              	bsr	pshvp
+028a 20 1f              	bra	stm3
+                        *+++++ PUTS +++++*
+028c                    litstr	equ	*
+028c 81 22              	cmpa	#'"
+028e 26 05              	bne	lscrlf
+0290 08                 	inx			PUTS statement
+0291 8d b4              	bsr	ost1
+0293 20 1a              	bra	excstd
+                        *+++++ CRLF +++++*
+0295                    lscrlf	equ	*
+0295 81 2f              	cmpa	#'/
+0297 26 05              	bne	artstm
+0299 bd 04 96           	jsr	crlf		CRLF statement
+029c 20 10              	bra	excstp
+029e                    artstm	equ	*
+029e df 72              	stx	mem72
+02a0 8d 2d              	bsr	srcequ
+02a2 bd 04 9f           	jsr	comand
+02a5 8d ae              	bsr	break
+02a7 de 4a              	ldx	mem4a
+02a9 26 08              	bne	stm4
+02ab                    stm3	equ	*
+02ab de 46              	ldx	mem46
+02ad 9c                 	fcb	$9c		CPX(dir)
+02ae                    excstp	equ	*
+02ae 08                 	inx
+02af                    excstd	equ	*
+02af a6 00              	ldaa	0,x
+02b1 26 b4              	bne	stm2
+02b3                    stm4	equ	*
+02b3 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Push var & pointers.					*
+                        *---------------------------------------------------------------*
+02b4                    pshvp	equ	*
+02b4 97 6a              	staa	mem6a
+02b6 d7 6b              	stab	mem6a+1
+02b8 bd 05 2e           	jsr	pshpnt
+02bb ce 00 6a           	ldx	#mem6a
+02be 7e 05 36           	jmp	pshx
+                        *---------------------------------------------------------------*
+                        *	Second arth-exp.					*
+                        *---------------------------------------------------------------*
+02c1                    secae	equ	*
+02c1 37                 	pshb
+02c2 08                 	inx
+02c3 8d 15              	bsr	artexp
+02c5 8d ed              	bsr	pshvp
+02c7 33                 	pulb
+02c8 32                 	pula
+02c9 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Search '=' mark.					*
+                        *---------------------------------------------------------------*
+02ca                    se1	equ	*
+02ca 86 3d              	ldaa	#'=
+02cc 7e 06 06           	jmp	error
+02cf                    srcequ	equ	*
+02cf a6 00              	ldaa	0,x
+02d1 08                 	inx
+02d2 85 df              	bita	#$df
+02d4 27 f4              	beq	se1
+02d6 81 3d              	cmpa	#'=
+02d8 26 f5              	bne	srcequ
+                        *---------------------------------------------------------------*
+                        *	Arithmatic expression.					*
+                        *---------------------------------------------------------------*
+02da                    artexp	equ	*
+02da 8d 1d              	bsr	term
+02dc                    ae1	equ	*
+02dc 36                 	psha
+02dd a6 00              	ldaa	0,x
+02df 85 df              	bita	#$df
+02e1 27 10              	beq	ae2
+02e3 81 29              	cmpa	#')
+02e5 27 0f              	beq	ae3
+02e7 81 2c              	cmpa	#',
+02e9 27 d6              	beq	secae
+02eb 32                 	pula
+02ec bd 03 5a           	jsr	bynope
+02ef de 5a              	ldx	mem5a
+02f1 20 e9              	bra	ae1
+02f3                    ae2	equ	*
+02f3 df 46              	stx	mem46
+02f5 9c                 	fcb	$9c		CPX(dir)
+02f6 08                 ae3	inx
+02f7 32                 	pula
+02f8 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Term (1).						*
+                        *---------------------------------------------------------------*
+02f9                    term	equ	*
+02f9 7e 06 29           	jmp	term2
+02fc                    term3	equ	*
+02fc c1 3f              	cmpb	#'?
+02fe 26 0b              	bne	tm1
+0300 df 76              	stx	mem76		line input
+0302 bd 04 76           	jsr	inplin
+0305 8d d3              	bsr	artexp
+0307 de 76              	ldx	mem76
+0309 08                 	inx
+030a 39                 	rts
+030b                    tm1	equ	*
+030b c1 28              	cmpb	#'(
+030d 26 03              	bne	getvar
+030f 08                 	inx			left parenthesis
+0310                    aeb	equ	*
+0310 20 c8              	bra	artexp
+0312                    getvar	equ	*
+0312 8d 31              	bsr	vname
+0314 81 3a              	cmpa	#':		8-bit indirect
+0316 27 08              	beq	get1b
+0318                    get2b	equ	*
+0318 8d 16              	bsr	adr2b
+031a a6 00              	ldaa	0,x
+031c e6 01              	ldab	1,x
+031e 20 05              	bra	gb1
+0320                    get1b	equ	*
+0320 8d 06              	bsr	adr1b
+0322 4f                 	clra
+0323 e6 00              	ldab	0,x
+0325                    gb1	equ	*
+0325 de 70              	ldx	mem70
+0327 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Variable address.					*
+                        *---------------------------------------------------------------*
+0328                    adr1b	equ	*
+0328 8d 10              	bsr	adrind
+032a                    ad0	equ	*
+032a db 77              	addb	mem76+1
+032c 99 76              	adca	mem76
+032e 20 25              	bra	av1
+0330                    adr2b	equ	*
+0330 81 28              	cmpa	#'(
+0332 26 1b              	bne	adrvar
+0334 8d 04              	bsr	adrind
+0336 58                 	aslb
+0337 49                 	rola
+0338 20 f0              	bra	ad0
+033a                    adrind	equ	*
+033a 8d 13              	bsr	adrvar
+033c ee 00              	ldx	0,x
+033e df 76              	stx	mem76
+0340 de 70              	ldx	mem70
+0342 08                 	inx
+0343 20 cb              	bra	aeb
+0345                    vname	equ	*
+0345 e6 00              	ldab	0,x
+0347                    vn1	equ	*
+0347 08                 	inx
+0348 a6 00              	ldaa	0,x
+034a 81 41              	cmpa	#'A
+034c 2a f9              	bpl	vn1
+034e 39                 	rts
+034f                    adrvar	equ	*
+034f 4f                 	clra
+0350 c4 3f              	andb	#$3f
+0352 cb 02              	addb	#2
+0354 58                 	aslb
+0355                    av1	equ	*
+0355 df 70              	stx	mem70
+0357 7e 05 1a           	jmp	tstzro
+                        *---------------------------------------------------------------*
+                        *	Bynary Operation (1).					*
+                        *---------------------------------------------------------------*
+035a                    bynope	equ	*
+035a 36                 	psha
+035b 37                 	pshb
+035c a6 00              	ldaa	0,x
+035e 36                 	psha
+035f e6 01              	ldab	1,x
+0361 37                 	pshb
+0362 c0 3d              	subb	#'=
+0364 27 03              	beq	tchr		<= >=
+0366 5a                 	decb
+0367 26 01              	bne	ochr		< = >
+0369                    tchr	equ	*		<>
+0369 08                 	inx
+036a                    ochr	equ	*
+036a 08                 	inx
+036b 8d 8c              	bsr	term
+036d 97 6a              	staa	mem6a
+036f d7 6b              	stab	mem6a+1
+0371 df 5a              	stx	mem5a
+0373 ce 00 6a           	ldx	#mem6a
+0376 33                 	pulb
+0377 32                 	pula
+                        *---------------------------------------------------------------*
+                        *	EQ.							*
+                        *---------------------------------------------------------------*
+0378 81 3d              	cmpa	#'=
+037a 26 0d              	bne	bo1
+037c 33                 	pulb			=
+037d 32                 	pula
+037e                    equal	equ	*
+037e 8d 51              	bsr	sub
+0380                    eq1	equ	*
+0380 26 24              	bne	false
+0382 5d                 	tstb
+0383 26 21              	bne	false
+0385                    true	equ	*
+0385 4f                 	clra
+0386 c6 01              	ldab	#1
+0388 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	NE & LT & LE.						*
+                        *---------------------------------------------------------------*
+0389                    bo1	equ	*
+0389 81 3c              	cmpa	#'<
+038b 26 1c              	bne	bo2
+038d c1 3d              	cmpb	#'=
+038f 27 0a              	beq	le
+0391 c1 3e              	cmpb	#'>
+0393 33                 	pulb
+0394 26 0b              	bne	lt
+0396 32                 	pula			<>
+0397 8d e5              	bsr	equal
+0399 20 23              	bra	nts
+039b                    le	equ	*		<=
+039b 33                 	pulb
+039c 32                 	pula
+039d 8d 19              	bsr	grater
+039f 20 1d              	bra	nts
+03a1                    lt	equ	*		<
+03a1 32                 	pula
+03a2                    less	equ	*
+03a2 8d 2d              	bsr	sub
+03a4 2d df              	blt	true
+03a6                    false	equ	*
+03a6 4f                 	clra
+03a7 5f                 	clrb
+03a8 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	GT & GE.						*
+                        *---------------------------------------------------------------*
+03a9                    bo2	equ	*
+03a9 81 3e              	cmpa	#'>
+03ab 26 14              	bne	bo3
+03ad c1 3d              	cmpb	#'=
+03af 33                 	pulb
+03b0 26 05              	bne	gt
+03b2 32                 	pula			>=
+03b3 8d ed              	bsr	less
+03b5 20 07              	bra	nts
+03b7                    gt	equ	*
+03b7 32                 	pula			>
+03b8                    grater	equ	*
+03b8 8d 17              	bsr	sub
+03ba 2d ea              	blt	false
+03bc 8d c2              	bsr	eq1
+03be                    nts	equ	*
+03be c8 01              	eorb	#1
+03c0 39                 	rts
+03c1                    bo3	equ	*
+03c1 33                 	pulb
+                        *---------------------------------------------------------------*
+                        *	Addition.						*
+                        *---------------------------------------------------------------*
+03c2 81 2b              	cmpa	#'+
+03c4 26 06              	bne	bo4
+03c6 32                 	pula
+03c7                    add	equ	*
+03c7 eb 01              	addb	1,x
+03c9 a9 00              	adca	0,x
+03cb 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Subtraction.						*
+                        *---------------------------------------------------------------*
+03cc                    bo4	equ	*
+03cc 81 2d              	cmpa	#'-
+03ce 26 06              	bne	bo5
+03d0 32                 	pula
+03d1                    sub	equ	*
+03d1 e0 01              	subb	1,x
+03d3 a2 00              	sbca	0,x
+03d5 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Multiplication.						*
+                        *---------------------------------------------------------------*
+03d6                    bo5	equ	*
+03d6 81 2a              	cmpa	#'*
+03d8 26 1f              	bne	bo6
+03da 32                 	pula
+03db                    mltply	equ	*
+03db 97 68              	staa	mem68
+03dd d7 69              	stab	mem68+1
+03df c6 10              	ldab	#16
+03e1 d7 66              	stab	mem66
+03e3 4f                 	clra
+03e4 5f                 	clrb
+03e5                    ml1	equ	*
+03e5 74 00 68           	lsr	mem68
+03e8 76 00 69           	ror	mem68+1
+03eb 24 02              	bcc	ml2
+03ed 8d d8              	bsr	add
+03ef                    ml2	equ	*
+03ef 68 01              	asl	1,x
+03f1 69 00              	rol	0,x
+03f3 7a 00 66           	dec	mem66
+03f6 26 ed              	bne	ml1
+03f8 39                 	rts
+03f9                    bo6	equ	*
+03f9 7e 05 c9           	jmp	bo8
+                        *---------------------------------------------------------------*
+                        *	Constant for 2-10.					*
+                        *---------------------------------------------------------------*
+03fc                    ctable	equ	*
+03fc 27 10              	fdb	10000
+03fe 03 e8              	fdb	1000
+0400 00 64              	fdb	100
+0402 00 0a              	fdb	10
+0404 00 01              	fdb	1
+                        *---------------------------------------------------------------*
+                        *	Positive division.					*
+                        *---------------------------------------------------------------*
+0406                    divpos	equ	*
+0406 7f 00 66           	clr	mem66
+0409                    dp1	equ	*
+0409 7c 00 66           	inc	mem66
+040c 68 01              	asl	1,x
+040e 69 00              	rol	0,x
+0410 24 f7              	bcc	dp1
+0412 66 00              	ror	0,x
+0414 66 01              	ror	1,x
+0416 7f 00 68           	clr	mem68
+0419 7f 00 69           	clr	mem68+1
+041c                    dp2	equ	*
+041c 8d b3              	bsr	sub
+041e 24 04              	bcc	dp3
+0420 8d a5              	bsr	add
+0422 0c                 	clc
+0423 9c                 	fcb	$9c		CPX(dir)
+0424                    dp3	equ	*
+0424 0d                 	sec
+0425 79 00 69           	rol	mem68+1
+0428 79 00 68           	rol	mem68
+042b 7a 00 66           	dec	mem66
+042e 27 12              	beq	tde
+0430 64 00              	lsr	0,x
+0432 66 01              	ror	1,x
+0434 20 e6              	bra	dp2
+                        *---------------------------------------------------------------*
+                        *	Test decimal number.					*
+                        *---------------------------------------------------------------*
+0436                    tstdec	equ	*
+0436 e6 00              	ldab	0,x
+0438 c1 30              	cmpb	#'0
+043a 25 03              	bcs	td1
+043c c1 3a              	cmpb	#'9+1
+043e 39                 	rts
+043f                    td1	equ	*
+043f 0c                 	clc
+0440 39                 	rts
+0441                    td2	equ	*
+0441 0d                 	sec
+0442                    tde	equ	*
+0442 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	Input command.						*
+                        *---------------------------------------------------------------*
+0443                    inpcom	equ	*
+0443 8d 2f              	bsr	il1
+                        *---------------------------------------------------------------*
+                        *	Decimal to Bynary.					*
+                        *---------------------------------------------------------------*
+0445                    deccns	equ	*
+0445 8d ef              	bsr	tstdec
+0447 24 f9              	bcc	tde
+0449                    decbyn	equ	*
+0449 4f                 	clra
+044a 5f                 	clrb
+044b                    db1	equ	*
+044b eb 00              	addb	0,x
+044d 89 00              	adca	#0
+044f c0 30              	subb	#'0
+0451 82 00              	sbca	#0
+0453 97 66              	staa	mem66
+0455 d7 67              	stab	mem66+1
+0457 08                 	inx
+0458 37                 	pshb
+0459 8d db              	bsr	tstdec
+045b 33                 	pulb
+045c 24 e3              	bcc	td2
+045e 58                 	aslb
+045f 49                 	rola
+0460 58                 	aslb
+0461 49                 	rola
+0462 db 67              	addb	mem66+1
+0464 99 66              	adca	mem66
+0466 58                 	aslb
+0467 49                 	rola
+0468 20 e1              	bra	db1
+                        *---------------------------------------------------------------*
+                        *	Input to Line Buffer.					*
+                        *---------------------------------------------------------------*
+046a                    il0	equ	*
+046a c1 5c              	cmpb	#delcode
+046c 27 06              	beq	il1
+046e 08                 	inx
+046f 8c 00 4a           	cpx	#74
+0472 26 0c              	bne	il3
+0474                    il1	equ	*
+0474 8d 20              	bsr	crlf
+0476                    inplin	equ	*
+0476 c6 3a              	ldab	#':
+0478 8d 22              	bsr	outbb
+047a ce 00 02           	ldx	#2
+047d                    il2	equ	*
+047d 09                 	dex
+047e 27 f6              	beq	inplin
+0480                    il3	equ	*
+0480 bd 02 64           	jsr	inpb
+0483 e7 8a              	stab	mem8b-1,x
+0485 c1 5e              	cmpb	#rubcode
+0487 27 f4              	beq	il2
+0489 c1 0d              	cmpb	#crcode
+048b 25 f3              	bcs	il3
+048d 26 db              	bne	il0
+048f 6f 8a              	clr	mem8b-1,x
+0491                    il4	equ	*
+0491 ce 00 8b           	ldx	#mem8b
+0494 20 04              	bra	lf
+                        *---------------------------------------------------------------*
+                        *	CR/LF.							*
+                        *---------------------------------------------------------------*
+0496                    crlf	equ	*
+0496 c6 0d              	ldab	#crcode
+0498 8d 02              	bsr	outbb
+049a                    lf	equ	*
+049a c6 0a              	ldab	#lfcode
+049c                    outbb	equ	*
+049c 7e 05 4a           	jmp	outb
+                        *---------------------------------------------------------------*
+                        *	Commands.						*
+                        *---------------------------------------------------------------*
+049f                    comand	equ	*
+049f 37                 	pshb
+04a0 de 72              	ldx	mem72
+04a2 e6 00              	ldab	0,x
+                        *+++++ TAB +++++*
+04a4 c1 2e              	cmpb	#'.
+04a6 26 0d              	bne	cm1
+04a8 33                 	pulb
+04a9 17                 	tba
+04aa                    tab1	equ	*
+04aa 4d                 	tsta
+04ab 27 11              	beq	ife
+04ad c6 20              	ldab	#spcode
+04af bd 05 4a           	jsr	outb
+04b2 4a                 	deca
+04b3 20 f5              	bra	tab1
+                        *+++++ IF +++++*
+04b5                    cm1	equ	*
+04b5 c1 3b              	cmpb	#';
+04b7 26 1b              	bne	cm3
+04b9 33                 	pulb
+04ba 8d 5e              	bsr	tstzro
+04bc 27 01              	beq	else
+04be                    ife	equ	*
+04be 39                 	rts
+04bf                    else	equ	*
+04bf be 01 16           	lds	main+1		#stack1
+04c2 7e 01 47           	jmp	nxtl
+                        *+++++ Pull Program Counter +++++*
+04c5                    pulpnt	equ	*
+04c5 ce 00 46           	ldx	#mem46
+04c8 8d 03              	bsr	pulx
+04ca ce 00 42           	ldx	#mem42
+04cd                    pulx	equ	*
+04cd 8d 29              	bsr	pulab
+04cf                    store	equ	*
+04cf a7 00              	staa	0,x
+04d1 e7 01              	stab	1,x
+04d3 39                 	rts
+                        *+++++ NEXT/UNTIL +++++*
+04d4                    cm3	equ	*
+04d4 c1 40              	cmpb	#'@
+04d6 26 2b              	bne	cm4
+04d8 36                 	psha
+04d9 e6 02              	ldab	2,x		Loop variable.
+04db bd 03 4f           	jsr	adrvar
+04de 32                 	pula
+04df 33                 	pulb
+04e0 8d ed              	bsr	store		Update the variable.
+04e2 8d 14              	bsr	pulab		End value.
+04e4 bd 03 a2           	jsr	less
+04e7 26 0d              	bne	adjsp2		Quit the loop.
+04e9                    huloop	equ	*
+04e9 8d da              	bsr	pulpnt		Pull Program Counter
+04eb de 89              	ldx	sp2		Recover SP2 pointer
+04ed 09                 	dex
+04ee 09                 	dex
+04ef 09                 	dex
+04f0 09                 	dex
+04f1 09                 	dex
+04f2 09                 	dex
+04f3 df 89              	stx	sp2
+04f5 39                 	rts
+04f6                    adjsp2	equ	*
+04f6 8d 00              	bsr	pulab		Drop Program Counter
+04f8                    pulab	equ	*
+04f8 9f 64              	sts	mem64
+04fa 9e 89              	lds	sp2
+04fc 32                 	pula
+04fd 33                 	pulb
+04fe 9f 89              	sts	sp2
+0500 9e 64              	lds	mem64
+0502 39                 	rts
+                        *+++++ NEW +++++*
+0503                    cm4	equ	*
+0503 c1 26              	cmpb	#'&
+0505 26 1a              	bne	cm5
+0507 e6 01              	ldab	1,x
+0509 c1 3d              	cmpb	#'=
+050b 26 14              	bne	cm5
+050d 33                 	pulb
+050e 8d 0a              	bsr	tstzro
+0510 26 07              	bne	newe
+0512 de 7e              	ldx	pgb
+0514 df 50              	stx	pge
+0516 4a                 	deca
+0517 a7 00              	staa	0,x
+0519                    newe	equ	*
+0519 39                 	rts
+051a                    tstzro	equ	*
+051a 97 6c              	staa	mem6c
+051c d7 6d              	stab	mem6c+1
+051e de 6c              	ldx	mem6c
+0520 39                 	rts
+                        *+++++ GOSUB +++++*
+0521                    cm5	equ	*
+0521 c1 21              	cmpb	#'!
+0523 26 20              	bne	cm6
+0525 33                 	pulb
+0526 97 4a              	staa	mem4a
+0528 d7 4b              	stab	mem4a+1
+052a 8d ee              	bsr	tstzro
+052c 27 16              	beq	gse
+052e                    pshpnt	equ	*
+052e ce 00 42           	ldx	#mem42
+0531 8d 03              	bsr	pshx
+0533 ce 00 46           	ldx	#mem46
+0536                    pshx	equ	*
+0536 9f 68              	sts	mem68
+0538 9e 89              	lds	sp2
+053a a6 00              	ldaa	0,x
+053c e6 01              	ldab	1,x
+053e 37                 	pshb
+053f 36                 	psha
+0540 9f 89              	sts	sp2
+0542 9e 68              	lds	mem68
+0544                    gse	equ	*
+0544 39                 	rts
+                        *+++++ PRINT ASCII CHR +++++*
+0545                    cm6	equ	*
+0545 c1 24              	cmpb	#'$
+0547 26 04              	bne	cm7
+0549 33                 	pulb
+054a                    outb	equ	*
+054a 7e 80 00           	jmp	outbbb
+                        *+++++ PRINT DECIMAL RIGHT +++++*
+054d                    cm7	equ	*
+054d c1 3f              	cmpb	#'?
+054f 26 3b              	bne	cm8
+0551 e6 01              	ldab	1,x
+0553 c1 28              	cmpb	#'(
+0555 27 03              	beq	printr
+0557 7e 06 99           	jmp	qmark
+055a                    printr	equ	*
+055a 36                 	psha
+055b 08                 	inx
+055c bd 06 29           	jsr	term2
+055f                    pr2	equ	*
+055f d7 88              	stab	mem88
+0561 32                 	pula
+0562 33                 	pulb
+0563 8d 10              	bsr	bdsgn
+0565 df 64              	stx	mem64
+0567 96 88              	ldaa	mem88
+0569 9b 65              	adda	mem64+1
+056b 80 88              	suba	#$88
+056d 2b 03              	bmi	pr1
+056f bd 04 aa           	jsr	tab1
+0572                    pr1	equ	*
+0572 7e 02 46           	jmp	outstr
+0575                    bdsgn	equ	*
+0575 4d                 	tsta
+0576 2b 03              	bmi	bdneg
+0578                    bdj	equ	*
+0578 7e 02 0d           	jmp	byndec
+057b                    bdneg	equ	*
+057b bd 06 00           	jsr	negab
+057e 8d f8              	bsr	bdj
+0580 c6 2d              	ldab	#'-
+0582 09                 	dex
+0583 e7 00              	stab	0,x
+0585                    pre	equ	*
+0585 39                 	rts
+0586                    outnum	equ	*
+0586 37                 	pshb
+0587 36                 	psha
+0588 c6 05              	ldab	#5
+058a 20 d3              	bra	pr2
+                        *+++++ PG Address Change +++++*
+058c                    cm8	equ	*
+058c c1 3d              	cmpb	#'=
+058e 26 12              	bne	cm9
+0590 33                 	pulb
+0591 97 7e              	staa	pgb
+0593 d7 7f              	stab	pgb+1
+0595 ce ff ff           	ldx	#$ffff
+0598 df 4a              	stx	mem4a
+059a bd 01 8c           	jsr	srclin
+059d df 50              	stx	pge
+059f 7e 01 15           	jmp	main
+                        *+++++ GO USER SUB +++++*
+05a2 c1 3e              cm9	cmpb	#'>
+05a4 26 09              	bne	stavar
+05a6 33                 	pulb
+05a7 bd 05 1a           	jsr	tstzro
+05aa 27 d9              	beq	pre
+05ac ad 00              	jsr	0,x
+05ae 37                 	pshb
+                        *+++++ LET +++++*
+05af                    stavar	equ	*
+05af 36                 	psha
+05b0 de 72              	ldx	mem72
+05b2 bd 03 45           	jsr	vname
+05b5 81 3a              	cmpa	#':
+05b7 26 08              	bne	sta2b
+05b9                    sta1b	equ	*
+05b9 bd 03 28           	jsr	adr1b
+05bc 32                 	pula
+05bd 33                 	pulb
+05be e7 00              	stab	0,x
+05c0 39                 	rts
+05c1 bd 03 30           sta2b	jsr	adr2b
+05c4 32                 	pula
+05c5 33                 	pulb
+05c6 7e 04 cf           	jmp	store
+                        *---------------------------------------------------------------*
+                        *	Bynary Operation (2).					*
+                        *---------------------------------------------------------------*
+                        
+                        *+++++ DIVISION +++++*
+05c9                    bo8	equ	*
+05c9 81 2f              	cmpa	#'/
+05cb 26 39              	bne	error
+05cd 7f 00 87           	clr	mem87
+05d0 6d 00              	tst	0,x
+05d2 26 06              	bne	dv1
+05d4 6d 01              	tst	1,x
+05d6 26 0f              	bne	dv3
+05d8 20 2c              	bra	error
+05da                    dv1	equ	*
+05da 2a 0b              	bpl	dv3
+05dc 7c 00 87           	inc	mem87
+05df 60 01              	neg	1,x
+05e1 26 02              	bne	dv2
+05e3 6a 00              	dec	0,x
+05e5                    dv2	equ	*
+05e5 63 00              	com	0,x
+05e7                    dv3	equ	*
+05e7 32                 	pula
+05e8 4d                 	tsta
+05e9 2a 05              	bpl	dv4
+05eb 7a 00 87           	dec	mem87
+05ee 8d 10              	bsr	negab
+05f0                    dv4	equ	*
+05f0 bd 04 06           	jsr	divpos
+05f3 97 4e              	staa	mem4e
+05f5 d7 4f              	stab	mem4e+1
+05f7 96 68              	ldaa	mem68
+05f9 d6 69              	ldab	mem68+1
+05fb 7d 00 87           	tst	mem87
+05fe 27 05              	beq	nege
+0600                    negab	equ	*
+0600 50                 	negb
+0601 26 01              	bne	ng1
+0603 4a                 	deca
+0604                    ng1	equ	*
+0604 43                 	coma
+0605                    nege	equ	*
+0605 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	ERROR.							*
+                        *---------------------------------------------------------------*
+0606                    error	equ	*
+0606 bd 04 96           	jsr	crlf
+0609 c6 3f              	ldab	#'?
+060b bd 05 4a           	jsr	outb
+060e 16                 	tab
+060f bd 05 4a           	jsr	outb
+0612 c6 20              	ldab	#spcode
+0614 bd 05 4a           	jsr	outb
+0617 de 42              	ldx	mem42
+0619 bc 04 92           	cpx	il4+1		#mem8b
+061c 26 05              	bne	er1
+061e bd 02 46           	jsr	outstr
+0621 20 03              	bra	ere
+0623                    er1	equ	*
+0623 bd 01 72           	jsr	outlin
+0626                    ere	equ	*
+0626 7e 01 15           	jmp	main
+                        *---------------------------------------------------------------*
+                        *	Term (2).						*
+                        *---------------------------------------------------------------*
+0629                    term2	equ	*
+0629 bd 04 45           	jsr	deccns
+062c 25 13              	bcs	abs1
+                        *+++++ Negative +++++*
+062e c1 2d              	cmpb	#'-
+0630 26 05              	bne	tm3
+0632 08                 	inx
+0633 8d f4              	bsr	term2
+0635                    neg1	equ	*
+0635 20 c9              	bra	negab
+                        *+++++ Absolute value +++++*
+0637                    tm3	equ	*
+0637 c1 2b              	cmpb	#'+
+0639 26 07              	bne	tm4
+063b 08                 	inx
+063c 8d eb              	bsr	term2
+063e 4d                 	tsta
+063f 2b f4              	bmi	neg1
+0641                    abs1	equ	*
+0641 39                 	rts
+                        *+++++ NOT +++++*
+0642                    tm4	equ	*
+0642 c1 23              	cmpb	#'#
+0644 26 07              	bne	tm5
+0646 08                 	inx
+0647 8d e0              	bsr	term2
+0649 4d                 	tsta
+064a 7e 03 80           	jmp	eq1
+                        *+++++ Modulo +++++*
+064d                    tm5	equ	*
+064d c1 25              	cmpb	#'%
+064f 26 08              	bne	tm6
+0651 08                 	inx
+0652 8d d5              	bsr	term2
+0654 96 4e              	ldaa	mem4e
+0656 d6 4f              	ldab	mem4e+1
+0658 39                 	rts
+                        *+++++ Random number +++++*
+0659                    tm6	equ	*
+0659 c1 27              	cmpb	#''
+065b 26 2a              	bne	tm7
+065d 08                 	inx
+065e 8d c9              	bsr	term2
+0660 97 6a              	staa	mem6a
+0662 d7 6b              	stab	mem6a+1
+0664 df 70              	stx	mem70
+0666 ce 00 52           	ldx	#mem52
+0669 86 3d              	ldaa	#$3d
+066b c6 09              	ldab	#$09
+066d bd 03 db           	jsr	mltply
+0670 8d 10              	bsr	add1
+0672 97 52              	staa	mem52
+0674 d7 53              	stab	mem52+1
+0676 ce 00 6a           	ldx	#mem6a
+0679 16                 	tab
+067a 4f                 	clra
+067b bd 03 db           	jsr	mltply
+067e 16                 	tab
+067f 4f                 	clra
+0680 de 70              	ldx	mem70
+0682                    add1	equ	*
+0682 cb 01              	addb	#1
+0684 89 00              	adca	#0
+0686 39                 	rts
+                        *+++++ ASCII constant +++++*
+0687                    tm7	equ	*
+0687 c1 22              	cmpb	#'"
+0689 26 07              	bne	tm8
+068b 4f                 	clra
+068c e6 01              	ldab	1,x
+068e 08                 	inx
+068f 08                 	inx
+0690 08                 	inx
+0691 39                 	rts
+                        *+++++ Hexadecimal constant +++++*
+0692                    tm8	equ	*
+0692 c1 24              	cmpb	#'$
+0694 27 2d              	beq	dollar
+0696 7e 02 fc           	jmp	term3
+                        *---------------------------------------------------------------*
+                        *	PRINT DEC / PRINT HEX.					*
+                        *---------------------------------------------------------------*
+0699                    qmark	equ	*
+0699 c1 3f              	cmpb	#'?
+069b 27 0b              	beq	prhex
+069d c1 24              	cmpb	#'$
+069f 27 0a              	beq	prhex2
+                        *+++++ PRINT LEFT +++++*
+06a1                    printl	equ	*
+06a1 33                 	pulb
+06a2 bd 05 75           	jsr	bdsgn
+06a5 7e 02 46           	jmp	outstr
+                        *+++++ PRINT 4 HEX +++++*
+06a8                    prhex	equ	*
+06a8 16                 	tab
+06a9 8d 02              	bsr	pr2hex
+                        *+++++ PRINT 2 HEX +++++*
+06ab                    prhex2	equ	*
+06ab 33                 	pulb
+06ac 17                 	tba
+06ad                    pr2hex	equ	*
+06ad 8d 05              	bsr	prhexh
+06af 16                 	tab
+06b0 c4 0f              	andb	#$0f
+06b2 20 04              	bra	prhexl
+06b4                    prhexh	equ	*
+06b4 54                 	lsrb
+06b5 54                 	lsrb
+06b6 54                 	lsrb
+06b7 54                 	lsrb
+06b8                    prhexl	equ	*
+06b8 c1 0a              	cmpb	#$0a
+06ba 2b 02              	bmi	ph1
+06bc cb 07              	addb	#'A-'0-10
+06be                    ph1	equ	*
+06be cb 30              	addb	#'0
+06c0                    ob1	equ	*
+06c0 7e 05 4a           	jmp	outb
+                        *---------------------------------------------------------------*
+                        *	"$" mark in A.E.					*
+                        *---------------------------------------------------------------*
+06c3                    dollar	equ	*
+06c3 4f                 	clra
+06c4 8d 19              	bsr	tsthex
+06c6 25 03              	bcs	hexbyn
+                        *+++++ ASCII input +++++*
+06c8                    ipb	equ	*
+06c8 7e 02 64           	jmp	inpb
+                        *+++++ HEX constant +++++*
+06cb                    hexbyn	equ	*
+06cb 37                 	pshb
+06cc 8d 11              	bsr	tsthex
+06ce d7 66              	stab	mem66
+06d0 33                 	pulb
+06d1 24 1f              	bcc	yeshex
+06d3 58                 	aslb
+06d4 49                 	rola
+06d5 58                 	aslb
+06d6 49                 	rola
+06d7 58                 	aslb
+06d8 49                 	rola
+06d9 58                 	aslb
+06da 49                 	rola
+06db db 66              	addb	mem66
+06dd 20 ec              	bra	hexbyn
+06df                    tsthex	equ	*
+06df 08                 	inx
+06e0 e6 00              	ldab	0,x
+06e2 c0 30              	subb	#'0
+06e4 25 0d              	bcs	nothex
+06e6 c1 0a              	cmpb	#10
+06e8 25 08              	bcs	yeshex
+06ea c0 07              	subb	#'A-'0-10
+06ec c1 0a              	cmpb	#10
+06ee 25 03              	bcs	nothex
+06f0 c1 10              	cmpb	#$10
+06f2                    yeshex	equ	*
+06f2 39                 	rts
+06f3                    nothex	equ	*
+06f3 0c                 	clc
+06f4 39                 	rts
+                        *---------------------------------------------------------------*
+                        *	"*READY" data.						*
+                        *---------------------------------------------------------------*
+06f5                    ready	equ	*
+06f5 0d 0a              	fcb	crcode,lfcode
+06f7 2a 52 45 41 44 59  	fcc	'*READY'
+06fd 00                 	fcb	0
+                        
+                        	end
+                        *=======================================================================*
+                        *	End of program.							*
+                        *=======================================================================*

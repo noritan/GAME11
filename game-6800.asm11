@@ -1,0 +1,1241 @@
+*
+*	G A M E
+*
+
+*=======================================================================*
+*	Memory allocation.						*
+*=======================================================================*
+stack1	equ	$00ff
+stack2	equ	$00d3
+sp2	equ	$0089
+start	equ	$0100
+prgbeg	equ	$0800
+ramend	equ	$5fff
+
+*=======================================================================*
+*	Terminal I/O routines.						*
+*=======================================================================*
+outbbb	equ	$8000
+inpbbb	equ	$8003
+tstbrk	equ	$8006
+
+*=======================================================================*
+*	Character codes.						*
+*=======================================================================*
+crcode	equ	$0d
+lfcode	equ	$0a
+spcode	equ	$20
+rubcode	equ	$5e
+delcode	equ	$5c
+
+*=======================================================================*
+*	System variables.						*
+*=======================================================================*
+wbase	equ	$0000
+varbase	equ	wbase+$02		@
+mem3c	equ	wbase+$3c		[
+mem42	equ	wbase+$42		_
+mem46	equ	wbase+$46		!
+mem4a	equ	wbase+$4a		#
+mem4e	equ	wbase+$4e		%
+pge	equ	wbase+$50		&
+mem52	equ	wbase+$52		'
+pgl	equ	wbase+$58		*
+mem5a	equ	wbase+$5a		+
+mem64	equ	wbase+$64		0
+mem66	equ	wbase+$66		1
+mem68	equ	wbase+$68		2
+mem6a	equ	wbase+$6a		3
+mem6c	equ	wbase+$6c		4
+mem6e	equ	wbase+$6e		5
+mem70	equ	wbase+$70		6
+mem72	equ	wbase+$72		7
+mem74	equ	wbase+$74		8
+mem76	equ	wbase+$76		9
+pgb	equ	wbase+$7e		=
+mem82	equ	wbase+$82		?
+mem87	equ	wbase+$87
+mem88	equ	wbase+$88
+mem8b	equ	wbase+$8b		line buffer to +$e3
+
+*=======================================================================*
+*	Main routine.							*
+*=======================================================================*
+	org	start
+coldst	equ	*
+	jmp	cstrt
+hotst	equ	*
+	bsr	hstrt
+*---------------------------------------------------------------*
+*	Cold start.						*
+*---------------------------------------------------------------*
+cstrt	equ	*
+	ldx	#prgbeg
+	stx	pgb
+	stx	pge
+	ldaa	#$ff
+	staa	0,x
+*---------------------------------------------------------------*
+*	Hot start.						*
+*---------------------------------------------------------------*
+hstrt	equ	*
+	ldx	#ramend
+	stx	pgl
+*---------------------------------------------------------------*
+*	Main loop.						*
+*---------------------------------------------------------------*
+main	equ	*
+	lds	#stack1
+	ldx	#stack2
+	stx	sp2
+	ldx	#ready
+	jsr	outstr
+pmode	equ	*
+	jsr	inpcom
+	bcs	tstlst
+	stx	mem42
+	jsr	excstd
+	beq	main
+newl	equ	*
+	bsr	srclin
+excl	equ	*
+	bmi	main
+	stx	mem42
+this	equ	*
+	inx
+	inx
+	ldaa	0,x
+	cmpa	#spcode
+	bne	nxtl
+	jsr	excstp
+	bne	jump
+	inx
+	tst	0,x
+	bra	excl
+nxtl	equ	*
+	bsr	nxtlin
+	bra	excl
+jump	equ	*
+	ldx	mem42
+	stx	mem72
+	bsr	srch
+	bmi	main
+	cpx	mem72
+	beq	newl
+	bra	this
+*---------------------------------------------------------------*
+*	List or Edit.						*
+*---------------------------------------------------------------*
+tstlst	equ	*
+	stx	mem74
+	staa	mem4a
+	stab	mem4a+1
+	ldab	0,x
+	cmpb	#'/
+	bne	editer
+*---------------------------------------------------------------*
+*	List Program.						*
+*---------------------------------------------------------------*
+list	equ	*
+	bsr	srclin
+llp	equ	*
+	jsr	crlf
+	tst	0,x
+	bmi	main
+	bsr	outlin
+	bra	llp
+*---------------------------------------------------------------*
+*	List a line.						*
+*---------------------------------------------------------------*
+outlin	equ	*
+	stx	mem42
+	ldaa	0,x
+	ldab	1,x
+	jsr	outnum
+	ldx	mem42
+	inx
+	inx
+	jsr	outstr
+*---------------------------------------------------------------*
+*	Search line end.					*
+*---------------------------------------------------------------*
+srczro	equ	*
+	ldx	mem42
+	inx
+sz1	equ	*
+	inx
+	tst	0,x
+	bne	sz1
+	inx
+	rts
+*---------------------------------------------------------------*
+*	Search the line.					*
+*---------------------------------------------------------------*
+srclin	equ	*
+	ldx	pgb
+sl	equ	*
+	stx	mem42
+srch	equ	*
+	ldaa	1,x
+	suba	mem4a+1
+	ldaa	0,x
+	bmi	sle
+	sbca	mem4a
+	bcc	found
+nxtlin	equ	*
+	bsr	srczro
+	bra	sl
+found	equ	*
+	clra
+sle	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Editer.							*
+*---------------------------------------------------------------*
+editer	equ	*
+	ldx	mem4a
+	beq	list
+	bmi	erend
+	ldx	pge
+	ldaa	0,x
+	inca
+	bne	erend
+	bsr	srclin
+	bmi	length
+	ldx	0,x
+	cpx	mem4a
+	bne	length
+delete	equ	*
+	bsr	srczro
+	lds	mem42
+d0	equ	*
+	ldaa	0,x
+	psha
+	ins
+	cpx	pge
+	beq	d1
+	inx
+	ins
+	bra	d0
+d1	equ	*
+	sts	pge
+length	equ	*
+	ldx	mem74
+	ldab	#3
+	tst	0,x
+	beq	edend
+l1	equ	*
+	incb
+	inx
+	tst	0,x
+	bne	l1
+	clra
+	addb	pge+1
+	adca	pge
+	staa	mem3c
+	stab	mem3c+1
+	subb	pgl+1
+	suba	pgl
+	bcc	erend
+mspace	equ	*
+	ldx	pge
+	lds	mem3c
+	sts	pge
+	inx
+ms1	equ	*
+	dex
+	ldab	0,x
+	pshb
+	cpx	mem42
+	bne	ms1
+insert	equ	*
+	lds	mem4a
+	sts	0,x
+	lds	mem74
+	des
+is1	equ	*
+	inx
+	pulb
+	stab	1,x
+	bne	is1
+edend	equ	*
+	lds	main+1		#stack1
+	jmp	pmode
+erend	equ	*
+	jmp	main
+*---------------------------------------------------------------*
+*	Bynary to Decimal.					*
+*---------------------------------------------------------------*
+byndec	equ	*
+	ldx	#mem82+1
+	stx	mem6c
+	ldx	#ctable
+bdl	equ	*
+	stx	mem6e
+	ldx	0,x
+	stx	mem70
+	ldx	#mem70
+	jsr	divpos		([68] = D / [x]), (D %= [x])
+	psha
+	ldx	mem6c
+	ldaa	mem68+1	
+	adda	#'0
+	staa	0,x
+	inx
+	stx	mem6c
+	ldx	mem6e
+	pula	
+	inx
+	inx
+	tst	1,x
+	bne	bdl
+	ldx	#mem82
+*---------------------------------------------------------------*
+*	Zero blanking.						*
+*---------------------------------------------------------------*
+zroblk	equ	*
+	com	5,x
+zb1	equ	*
+	inx
+	ldab	0,x
+	cmpb	#'0
+	beq	zb1
+	com	mem82+5
+zb2	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Output chr String.					*
+*---------------------------------------------------------------*
+outstr	equ	*
+	clra
+ost1	equ	*
+	staa	mem88
+o2	equ	*
+	ldab	0,x
+	inx
+	cmpb	mem88
+	beq	break
+	jsr	outb
+	bra	o2
+*---------------------------------------------------------------*
+*	Break.							*
+*---------------------------------------------------------------*
+break	equ	*
+	jsr	tstbrk
+	bcc	zb2
+	bsr	inpb
+	cmpb	#3		ctrl-C
+	beq	erend
+	cmpb	#1		ctrl-A
+	bne	zb2
+inpb	equ	*
+	jmp	inpbbb
+*---------------------------------------------------------------*
+*	Execute Statements.					*
+*---------------------------------------------------------------*
+stm2	equ	*
+	cmpa	#spcode
+	beq	excstp		delimiter
+	clrb
+	stab	mem4a
+	stab	mem4a+1
+nopstm	equ	*
+	ldab	1,x
+	bitb	#$df		Check SPACE and NUL
+	bne	litstr
+*+++++ RETURN +++++*
+return	equ	*		Check one character command
+	cmpa	#']
+	bne	do
+	jsr	pulpnt		RETURN statement
+	bra	stm3
+*+++++ DO +++++*
+do	equ	*
+	cmpa	#'@
+	bne	litstr
+	inx			DO statement
+	stx	mem46
+	clra
+	clrb
+	bsr	pshvp
+	bra	stm3
+*+++++ PUTS +++++*
+litstr	equ	*
+	cmpa	#'"
+	bne	lscrlf
+	inx			PUTS statement
+	bsr	ost1
+	bra	excstd
+*+++++ CRLF +++++*
+lscrlf	equ	*
+	cmpa	#'/
+	bne	artstm
+	jsr	crlf		CRLF statement
+	bra	excstp
+artstm	equ	*
+	stx	mem72
+	bsr	srcequ
+	jsr	comand
+	bsr	break
+	ldx	mem4a
+	bne	stm4
+stm3	equ	*
+	ldx	mem46
+	fcb	$9c		CPX(dir)
+excstp	equ	*
+	inx
+excstd	equ	*
+	ldaa	0,x
+	bne	stm2
+stm4	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Push var & pointers.					*
+*---------------------------------------------------------------*
+pshvp	equ	*
+	staa	mem6a
+	stab	mem6a+1
+	jsr	pshpnt
+	ldx	#mem6a
+	jmp	pshx
+*---------------------------------------------------------------*
+*	Second arth-exp.					*
+*---------------------------------------------------------------*
+secae	equ	*
+	pshb
+	inx
+	bsr	artexp
+	bsr	pshvp
+	pulb
+	pula
+	rts
+*---------------------------------------------------------------*
+*	Search '=' mark.					*
+*---------------------------------------------------------------*
+se1	equ	*
+	ldaa	#'=
+	jmp	error
+srcequ	equ	*
+	ldaa	0,x
+	inx
+	bita	#$df
+	beq	se1
+	cmpa	#'=
+	bne	srcequ
+*---------------------------------------------------------------*
+*	Arithmatic expression.					*
+*---------------------------------------------------------------*
+artexp	equ	*
+	bsr	term
+ae1	equ	*
+	psha
+	ldaa	0,x
+	bita	#$df
+	beq	ae2
+	cmpa	#')
+	beq	ae3
+	cmpa	#',
+	beq	secae
+	pula
+	jsr	bynope
+	ldx	mem5a
+	bra	ae1
+ae2	equ	*
+	stx	mem46
+	fcb	$9c		CPX(dir)
+ae3	inx
+	pula
+	rts
+*---------------------------------------------------------------*
+*	Term (1).						*
+*---------------------------------------------------------------*
+term	equ	*
+	jmp	term2
+term3	equ	*
+	cmpb	#'?
+	bne	tm1
+	stx	mem76		line input
+	jsr	inplin
+	bsr	artexp
+	ldx	mem76
+	inx
+	rts
+tm1	equ	*
+	cmpb	#'(
+	bne	getvar
+	inx			left parenthesis
+aeb	equ	*
+	bra	artexp
+getvar	equ	*
+	bsr	vname
+	cmpa	#':		8-bit indirect
+	beq	get1b
+get2b	equ	*
+	bsr	adr2b
+	ldaa	0,x
+	ldab	1,x
+	bra	gb1
+get1b	equ	*
+	bsr	adr1b
+	clra
+	ldab	0,x
+gb1	equ	*
+	ldx	mem70
+	rts
+*---------------------------------------------------------------*
+*	Variable address.					*
+*---------------------------------------------------------------*
+adr1b	equ	*
+	bsr	adrind
+ad0	equ	*
+	addb	mem76+1
+	adca	mem76
+	bra	av1
+adr2b	equ	*
+	cmpa	#'(
+	bne	adrvar
+	bsr	adrind
+	aslb
+	rola
+	bra	ad0
+adrind	equ	*
+	bsr	adrvar
+	ldx	0,x
+	stx	mem76
+	ldx	mem70
+	inx
+	bra	aeb
+vname	equ	*
+	ldab	0,x
+vn1	equ	*
+	inx
+	ldaa	0,x
+	cmpa	#'A
+	bpl	vn1
+	rts
+adrvar	equ	*
+	clra
+	andb	#$3f
+	addb	#2
+	aslb
+av1	equ	*
+	stx	mem70
+	jmp	tstzro
+*---------------------------------------------------------------*
+*	Bynary Operation (1).					*
+*---------------------------------------------------------------*
+bynope	equ	*
+	psha
+	pshb
+	ldaa	0,x
+	psha
+	ldab	1,x
+	pshb
+	subb	#'=
+	beq	tchr		<= >=
+	decb
+	bne	ochr		< = >
+tchr	equ	*		<>
+	inx
+ochr	equ	*
+	inx
+	bsr	term
+	staa	mem6a
+	stab	mem6a+1
+	stx	mem5a
+	ldx	#mem6a
+	pulb
+	pula
+*---------------------------------------------------------------*
+*	EQ.							*
+*---------------------------------------------------------------*
+	cmpa	#'=
+	bne	bo1
+	pulb			=
+	pula
+equal	equ	*
+	bsr	sub
+eq1	equ	*
+	bne	false
+	tstb
+	bne	false
+true	equ	*
+	clra
+	ldab	#1
+	rts
+*---------------------------------------------------------------*
+*	NE & LT & LE.						*
+*---------------------------------------------------------------*
+bo1	equ	*
+	cmpa	#'<
+	bne	bo2
+	cmpb	#'=
+	beq	le
+	cmpb	#'>
+	pulb
+	bne	lt
+	pula			<>
+	bsr	equal
+	bra	nts
+le	equ	*		<=
+	pulb
+	pula
+	bsr	grater
+	bra	nts
+lt	equ	*		<
+	pula
+less	equ	*
+	bsr	sub
+	blt	true
+false	equ	*
+	clra
+	clrb
+	rts
+*---------------------------------------------------------------*
+*	GT & GE.						*
+*---------------------------------------------------------------*
+bo2	equ	*
+	cmpa	#'>
+	bne	bo3
+	cmpb	#'=
+	pulb
+	bne	gt
+	pula			>=
+	bsr	less
+	bra	nts
+gt	equ	*
+	pula			>
+grater	equ	*
+	bsr	sub
+	blt	false
+	bsr	eq1
+nts	equ	*
+	eorb	#1
+	rts
+bo3	equ	*
+	pulb
+*---------------------------------------------------------------*
+*	Addition.						*
+*---------------------------------------------------------------*
+	cmpa	#'+
+	bne	bo4
+	pula
+add	equ	*
+	addb	1,x
+	adca	0,x
+	rts
+*---------------------------------------------------------------*
+*	Subtraction.						*
+*---------------------------------------------------------------*
+bo4	equ	*
+	cmpa	#'-
+	bne	bo5
+	pula
+sub	equ	*
+	subb	1,x
+	sbca	0,x
+	rts
+*---------------------------------------------------------------*
+*	Multiplication.						*
+*---------------------------------------------------------------*
+bo5	equ	*
+	cmpa	#'*
+	bne	bo6
+	pula
+mltply	equ	*
+	staa	mem68
+	stab	mem68+1
+	ldab	#16
+	stab	mem66
+	clra
+	clrb
+ml1	equ	*
+	lsr	mem68
+	ror	mem68+1
+	bcc	ml2
+	bsr	add
+ml2	equ	*
+	asl	1,x
+	rol	0,x
+	dec	mem66
+	bne	ml1
+	rts
+bo6	equ	*
+	jmp	bo8
+*---------------------------------------------------------------*
+*	Constant for 2-10.					*
+*---------------------------------------------------------------*
+ctable	equ	*
+	fdb	10000
+	fdb	1000
+	fdb	100
+	fdb	10
+	fdb	1
+*---------------------------------------------------------------*
+*	Positive division.					*
+*---------------------------------------------------------------*
+divpos	equ	*
+	clr	mem66
+dp1	equ	*
+	inc	mem66
+	asl	1,x
+	rol	0,x
+	bcc	dp1
+	ror	0,x
+	ror	1,x
+	clr	mem68
+	clr	mem68+1
+dp2	equ	*
+	bsr	sub
+	bcc	dp3
+	bsr	add
+	clc
+	fcb	$9c		CPX(dir)
+dp3	equ	*
+	sec
+	rol	mem68+1
+	rol	mem68
+	dec	mem66
+	beq	tde
+	lsr	0,x
+	ror	1,x
+	bra	dp2
+*---------------------------------------------------------------*
+*	Test decimal number.					*
+*---------------------------------------------------------------*
+tstdec	equ	*
+	ldab	0,x
+	cmpb	#'0
+	bcs	td1
+	cmpb	#'9+1
+	rts
+td1	equ	*
+	clc
+	rts
+td2	equ	*
+	sec
+tde	equ	*
+	rts
+*---------------------------------------------------------------*
+*	Input command.						*
+*---------------------------------------------------------------*
+inpcom	equ	*
+	bsr	il1
+*---------------------------------------------------------------*
+*	Decimal to Bynary.					*
+*---------------------------------------------------------------*
+deccns	equ	*
+	bsr	tstdec
+	bcc	tde
+decbyn	equ	*
+	clra
+	clrb
+db1	equ	*
+	addb	0,x
+	adca	#0
+	subb	#'0
+	sbca	#0
+	staa	mem66
+	stab	mem66+1
+	inx
+	pshb
+	bsr	tstdec
+	pulb
+	bcc	td2
+	aslb
+	rola
+	aslb
+	rola
+	addb	mem66+1
+	adca	mem66
+	aslb
+	rola
+	bra	db1
+*---------------------------------------------------------------*
+*	Input to Line Buffer.					*
+*---------------------------------------------------------------*
+il0	equ	*
+	cmpb	#delcode
+	beq	il1
+	inx
+	cpx	#74
+	bne	il3
+il1	equ	*
+	bsr	crlf
+inplin	equ	*
+	ldab	#':
+	bsr	outbb
+	ldx	#2
+il2	equ	*
+	dex
+	beq	inplin
+il3	equ	*
+	jsr	inpb
+	stab	mem8b-1,x
+	cmpb	#rubcode
+	beq	il2
+	cmpb	#crcode
+	bcs	il3
+	bne	il0
+	clr	mem8b-1,x
+il4	equ	*
+	ldx	#mem8b
+	bra	lf
+*---------------------------------------------------------------*
+*	CR/LF.							*
+*---------------------------------------------------------------*
+crlf	equ	*
+	ldab	#crcode
+	bsr	outbb
+lf	equ	*
+	ldab	#lfcode
+outbb	equ	*
+	jmp	outb
+*---------------------------------------------------------------*
+*	Commands.						*
+*---------------------------------------------------------------*
+comand	equ	*
+	pshb
+	ldx	mem72
+	ldab	0,x
+*+++++ TAB +++++*
+	cmpb	#'.
+	bne	cm1
+	pulb
+	tba
+tab1	equ	*
+	tsta
+	beq	ife
+	ldab	#spcode
+	jsr	outb
+	deca
+	bra	tab1
+*+++++ IF +++++*
+cm1	equ	*
+	cmpb	#';
+	bne	cm3
+	pulb
+	bsr	tstzro
+	beq	else
+ife	equ	*
+	rts
+else	equ	*
+	lds	main+1		#stack1
+	jmp	nxtl
+*+++++ Pull Program Counter +++++*
+pulpnt	equ	*
+	ldx	#mem46
+	bsr	pulx
+	ldx	#mem42
+pulx	equ	*
+	bsr	pulab
+store	equ	*
+	staa	0,x
+	stab	1,x
+	rts
+*+++++ NEXT/UNTIL +++++*
+cm3	equ	*
+	cmpb	#'@
+	bne	cm4
+	psha
+	ldab	2,x		Loop variable.
+	jsr	adrvar
+	pula
+	pulb
+	bsr	store		Update the variable.
+	bsr	pulab		End value.
+	jsr	less
+	bne	adjsp2		Quit the loop.
+huloop	equ	*
+	bsr	pulpnt		Pull Program Counter
+	ldx	sp2		Recover SP2 pointer
+	dex
+	dex
+	dex
+	dex
+	dex
+	dex
+	stx	sp2
+	rts
+adjsp2	equ	*
+	bsr	pulab		Drop Program Counter
+pulab	equ	*
+	sts	mem64
+	lds	sp2
+	pula
+	pulb
+	sts	sp2
+	lds	mem64
+	rts
+*+++++ NEW +++++*
+cm4	equ	*
+	cmpb	#'&
+	bne	cm5
+	ldab	1,x
+	cmpb	#'=
+	bne	cm5
+	pulb
+	bsr	tstzro
+	bne	newe
+	ldx	pgb
+	stx	pge
+	deca
+	staa	0,x
+newe	equ	*
+	rts
+tstzro	equ	*
+	staa	mem6c
+	stab	mem6c+1
+	ldx	mem6c
+	rts
+*+++++ GOSUB +++++*
+cm5	equ	*
+	cmpb	#'!
+	bne	cm6
+	pulb
+	staa	mem4a
+	stab	mem4a+1
+	bsr	tstzro
+	beq	gse
+pshpnt	equ	*
+	ldx	#mem42
+	bsr	pshx
+	ldx	#mem46
+pshx	equ	*
+	sts	mem68
+	lds	sp2
+	ldaa	0,x
+	ldab	1,x
+	pshb
+	psha
+	sts	sp2
+	lds	mem68
+gse	equ	*
+	rts
+*+++++ PRINT ASCII CHR +++++*
+cm6	equ	*
+	cmpb	#'$
+	bne	cm7
+	pulb
+outb	equ	*
+	jmp	outbbb
+*+++++ PRINT DECIMAL RIGHT +++++*
+cm7	equ	*
+	cmpb	#'?
+	bne	cm8
+	ldab	1,x
+	cmpb	#'(
+	beq	printr
+	jmp	qmark
+printr	equ	*
+	psha
+	inx
+	jsr	term2
+pr2	equ	*
+	stab	mem88
+	pula
+	pulb
+	bsr	bdsgn
+	stx	mem64
+	ldaa	mem88
+	adda	mem64+1
+	suba	#$88
+	bmi	pr1
+	jsr	tab1
+pr1	equ	*
+	jmp	outstr
+bdsgn	equ	*
+	tsta
+	bmi	bdneg
+bdj	equ	*
+	jmp	byndec
+bdneg	equ	*
+	jsr	negab
+	bsr	bdj
+	ldab	#'-
+	dex
+	stab	0,x
+pre	equ	*
+	rts
+outnum	equ	*
+	pshb
+	psha
+	ldab	#5
+	bra	pr2
+*+++++ PG Address Change +++++*
+cm8	equ	*
+	cmpb	#'=
+	bne	cm9
+	pulb
+	staa	pgb
+	stab	pgb+1
+	ldx	#$ffff
+	stx	mem4a
+	jsr	srclin
+	stx	pge
+	jmp	main
+*+++++ GO USER SUB +++++*
+cm9	cmpb	#'>
+	bne	stavar
+	pulb
+	jsr	tstzro
+	beq	pre
+	jsr	0,x
+	pshb
+*+++++ LET +++++*
+stavar	equ	*
+	psha
+	ldx	mem72
+	jsr	vname
+	cmpa	#':
+	bne	sta2b
+sta1b	equ	*
+	jsr	adr1b
+	pula
+	pulb
+	stab	0,x
+	rts
+sta2b	jsr	adr2b
+	pula
+	pulb
+	jmp	store
+*---------------------------------------------------------------*
+*	Bynary Operation (2).					*
+*---------------------------------------------------------------*
+
+*+++++ DIVISION +++++*
+bo8	equ	*
+	cmpa	#'/
+	bne	error
+	clr	mem87
+	tst	0,x
+	bne	dv1
+	tst	1,x
+	bne	dv3
+	bra	error
+dv1	equ	*
+	bpl	dv3
+	inc	mem87
+	neg	1,x
+	bne	dv2
+	dec	0,x
+dv2	equ	*
+	com	0,x
+dv3	equ	*
+	pula
+	tsta
+	bpl	dv4
+	dec	mem87
+	bsr	negab
+dv4	equ	*
+	jsr	divpos
+	staa	mem4e
+	stab	mem4e+1
+	ldaa	mem68
+	ldab	mem68+1
+	tst	mem87
+	beq	nege
+negab	equ	*
+	negb
+	bne	ng1
+	deca
+ng1	equ	*
+	coma
+nege	equ	*
+	rts
+*---------------------------------------------------------------*
+*	ERROR.							*
+*---------------------------------------------------------------*
+error	equ	*
+	jsr	crlf
+	ldab	#'?
+	jsr	outb
+	tab
+	jsr	outb
+	ldab	#spcode
+	jsr	outb
+	ldx	mem42
+	cpx	il4+1		#mem8b
+	bne	er1
+	jsr	outstr
+	bra	ere
+er1	equ	*
+	jsr	outlin
+ere	equ	*
+	jmp	main
+*---------------------------------------------------------------*
+*	Term (2).						*
+*---------------------------------------------------------------*
+term2	equ	*
+	jsr	deccns
+	bcs	abs1
+*+++++ Negative +++++*
+	cmpb	#'-
+	bne	tm3
+	inx
+	bsr	term2
+neg1	equ	*
+	bra	negab
+*+++++ Absolute value +++++*
+tm3	equ	*
+	cmpb	#'+
+	bne	tm4
+	inx
+	bsr	term2
+	tsta
+	bmi	neg1
+abs1	equ	*
+	rts
+*+++++ NOT +++++*
+tm4	equ	*
+	cmpb	#'#
+	bne	tm5
+	inx
+	bsr	term2
+	tsta
+	jmp	eq1
+*+++++ Modulo +++++*
+tm5	equ	*
+	cmpb	#'%
+	bne	tm6
+	inx
+	bsr	term2
+	ldaa	mem4e
+	ldab	mem4e+1
+	rts
+*+++++ Random number +++++*
+tm6	equ	*
+	cmpb	#''
+	bne	tm7
+	inx
+	bsr	term2
+	staa	mem6a
+	stab	mem6a+1
+	stx	mem70
+	ldx	#mem52
+	ldaa	#$3d
+	ldab	#$09
+	jsr	mltply
+	bsr	add1
+	staa	mem52
+	stab	mem52+1
+	ldx	#mem6a
+	tab
+	clra
+	jsr	mltply
+	tab
+	clra
+	ldx	mem70
+add1	equ	*
+	addb	#1
+	adca	#0
+	rts
+*+++++ ASCII constant +++++*
+tm7	equ	*
+	cmpb	#'"
+	bne	tm8
+	clra
+	ldab	1,x
+	inx
+	inx
+	inx
+	rts
+*+++++ Hexadecimal constant +++++*
+tm8	equ	*
+	cmpb	#'$
+	beq	dollar
+	jmp	term3
+*---------------------------------------------------------------*
+*	PRINT DEC / PRINT HEX.					*
+*---------------------------------------------------------------*
+qmark	equ	*
+	cmpb	#'?
+	beq	prhex
+	cmpb	#'$
+	beq	prhex2
+*+++++ PRINT LEFT +++++*
+printl	equ	*
+	pulb
+	jsr	bdsgn
+	jmp	outstr
+*+++++ PRINT 4 HEX +++++*
+prhex	equ	*
+	tab
+	bsr	pr2hex
+*+++++ PRINT 2 HEX +++++*
+prhex2	equ	*
+	pulb
+	tba
+pr2hex	equ	*
+	bsr	prhexh
+	tab
+	andb	#$0f
+	bra	prhexl
+prhexh	equ	*
+	lsrb
+	lsrb
+	lsrb
+	lsrb
+prhexl	equ	*
+	cmpb	#$0a
+	bmi	ph1
+	addb	#'A-'0-10
+ph1	equ	*
+	addb	#'0
+ob1	equ	*
+	jmp	outb
+*---------------------------------------------------------------*
+*	"$" mark in A.E.					*
+*---------------------------------------------------------------*
+dollar	equ	*
+	clra
+	bsr	tsthex
+	bcs	hexbyn
+*+++++ ASCII input +++++*
+ipb	equ	*
+	jmp	inpb
+*+++++ HEX constant +++++*
+hexbyn	equ	*
+	pshb
+	bsr	tsthex
+	stab	mem66
+	pulb
+	bcc	yeshex
+	aslb
+	rola
+	aslb
+	rola
+	aslb
+	rola
+	aslb
+	rola
+	addb	mem66
+	bra	hexbyn
+tsthex	equ	*
+	inx
+	ldab	0,x
+	subb	#'0
+	bcs	nothex
+	cmpb	#10
+	bcs	yeshex
+	subb	#'A-'0-10
+	cmpb	#10
+	bcs	nothex
+	cmpb	#$10
+yeshex	equ	*
+	rts
+nothex	equ	*
+	clc
+	rts
+*---------------------------------------------------------------*
+*	"*READY" data.						*
+*---------------------------------------------------------------*
+ready	equ	*
+	fcb	crcode,lfcode
+	fcc	'*READY'
+	fcb	0
+
+	end
+*=======================================================================*
+*	End of program.							*
+*=======================================================================*
